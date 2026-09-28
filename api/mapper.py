@@ -52,27 +52,67 @@ def _clean_int(value) -> str:
     return re.sub(r"[^0-9]", "", str(value))
 
 
-def map_scenes(scenes: list, kg, triples: list) -> None:
+LOCATION_TYPES = {"World", "Region", "Location", "Room"}
+
+
+def _location_type(location: dict) -> str:
+    location_type = location.get("location_type") or "Location"
+    return location_type if location_type in LOCATION_TYPES else "Location"
+
+
+def map_locations(locations: list, kg, triples: list) -> None:
     seen = set()
-    for scene in scenes:
-        name = scene.get("location_name")
+    for location in locations:
+        name = location.get("location_name")
         if not name:
             continue
-        location_type = scene.get("location_type") or "Location"
-        if location_type not in {"World", "Region", "Location", "Room"}:
-            location_type = "Location"
-        location_uri = kg.get_or_create_uri(name, location_type, triples)
+        location_uri = kg.get_or_create_uri(name, _location_type(location), triples)
 
-        if scene.get("physical_appearance"):
-            _add_descriptive(kg, seen, location_uri, "physicalAppearance", scene["physical_appearance"], triples)
-        if scene.get("gm_description"):
-            _add_descriptive(kg, seen, location_uri, "gmDescription", scene["gm_description"], triples)
-        if scene.get("parent_location_hint"):
-            parent_uri = kg.get_or_create_uri(scene["parent_location_hint"], "Location", triples)
+        if location.get("physical_appearance"):
+            _add_descriptive(kg, seen, location_uri, "physicalAppearance", location["physical_appearance"], triples)
+        if location.get("gm_description"):
+            _add_descriptive(kg, seen, location_uri, "gmDescription", location["gm_description"], triples)
+        if location.get("lore_context"):
+            _add_descriptive(kg, seen, location_uri, "loreContext", location["lore_context"], triples)
+        if location.get("parent_location_hint"):
+            parent_uri = kg.get_or_create_uri(location["parent_location_hint"], "Location", triples)
             triples.append(f"{location_uri} rpg:locatedIn {parent_uri} .")
-        if scene.get("scene_name"):
-            scene_uri = kg.get_or_create_uri(scene["scene_name"], "Scene", triples)
-            triples.append(f"{location_uri} rpg:hostsScene {scene_uri} .")
+
+
+def map_scenes(scenes: list, kg, triples: list) -> None:
+    """The Scene is the hub an encounter is built around - actor/item/trigger/
+    readaloud/lore extraction each carry a `scene_context` name forward and
+    link into it (see map_actors, map_items, map_readaloud, map_triggers,
+    map_lore); this just gives the Scene node itself a description and, for
+    a module with a sequence of set-piece encounters, a caused/dependsOn
+    chain to the scenes before/after it."""
+    seen = set()
+    for scene in scenes:
+        name = scene.get("scene_name")
+        if not name:
+            continue
+        scene_uri = kg.get_or_create_uri(name, "Scene", triples)
+        if scene.get("gm_description"):
+            _add_descriptive(kg, seen, scene_uri, "gmDescription", scene["gm_description"], triples)
+        if scene.get("caused_event"):
+            target_uri = kg.get_or_create_uri(scene["caused_event"], "Scene", triples)
+            triples.append(f"{scene_uri} rpg:caused {target_uri} .")
+        if scene.get("depends_on_event"):
+            target_uri = kg.get_or_create_uri(scene["depends_on_event"], "Scene", triples)
+            triples.append(f"{scene_uri} rpg:dependsOn {target_uri} .")
+
+
+def map_hosts_scene(location: dict, scene: dict, kg, triples: list) -> None:
+    """Links the Location a chunk describes to the Scene it frames, when a
+    chunk yields both. Kept separate from map_locations/map_scenes since
+    those each operate on one side's list without knowing the other exists."""
+    location_name = location.get("location_name")
+    scene_name = scene.get("scene_name")
+    if not location_name or not scene_name:
+        return
+    location_uri = kg.get_or_create_uri(location_name, _location_type(location), triples)
+    scene_uri = kg.get_or_create_uri(scene_name, "Scene", triples)
+    triples.append(f"{location_uri} rpg:hostsScene {scene_uri} .")
 
 
 def map_readaloud(entries: list, kg, triples: list) -> None:
@@ -81,7 +121,8 @@ def map_readaloud(entries: list, kg, triples: list) -> None:
         text = entry.get("text")
         if not text:
             continue
-        text_uri = kg.get_or_create_uri(text[:60], "ReadAloudText", triples)
+        label = entry.get("label") or text[:60]
+        text_uri = kg.get_or_create_uri(label, "ReadAloudText", triples)
         _add_descriptive(kg, seen, text_uri, "physicalAppearance", text, triples)
         if entry.get("is_player_facing") is not None:
             triples.append(_bool_triple(text_uri, "isPlayerFacing", bool(entry["is_player_facing"])))
@@ -102,7 +143,8 @@ def map_triggers(entries: list, kg, triples: list) -> None:
         condition = entry.get("trigger_condition")
         if not condition:
             continue
-        trigger_uri = kg.get_or_create_uri(condition[:80], "Trigger", triples)
+        trigger_label = entry.get("label") or condition[:80]
+        trigger_uri = kg.get_or_create_uri(trigger_label, "Trigger", triples)
 
         notes = []
         if entry.get("check_type"):
@@ -123,7 +165,8 @@ def map_triggers(entries: list, kg, triples: list) -> None:
             mapped_type = "Actor" if reveal_type == "ActorSpawn" else reveal_type
             if mapped_type not in {"HiddenInfo", "ReadAloudText", "Actor", "Event"}:
                 mapped_type = "HiddenInfo"
-            reveal_uri = kg.get_or_create_uri(reveals_content[:80], mapped_type, triples)
+            reveals_label = entry.get("reveals_label") or reveals_content[:80]
+            reveal_uri = kg.get_or_create_uri(reveals_label, mapped_type, triples)
             predicate = "physicalAppearance" if mapped_type == "ReadAloudText" else "gmDescription"
             _add_descriptive(kg, seen, reveal_uri, predicate, reveals_content, triples)
             triples.append(f"{trigger_uri} rpg:reveals {reveal_uri} .")
@@ -183,6 +226,9 @@ def map_lore(entries: list, kg, triples: list) -> None:
         for actor_name in entry.get("related_actors") or []:
             actor_uri = kg.get_or_create_uri(actor_name, "Actor", triples)
             triples.append(f"{actor_uri} rpg:participatedIn {event_uri} .")
+        if entry.get("scene_context"):
+            scene_uri = kg.get_or_create_uri(entry["scene_context"], "Scene", triples)
+            triples.append(f"{scene_uri} rpg:containsEvent {event_uri} .")
 
 
 def map_actors(entries: list, kg, triples: list) -> None:
@@ -196,6 +242,8 @@ def map_actors(entries: list, kg, triples: list) -> None:
             _add_descriptive(kg, seen, actor_uri, "physicalAppearance", entry["physical_appearance"], triples)
         if entry.get("gm_description"):
             _add_descriptive(kg, seen, actor_uri, "gmDescription", entry["gm_description"], triples)
+        if entry.get("lore_context"):
+            _add_descriptive(kg, seen, actor_uri, "loreContext", entry["lore_context"], triples)
         if entry.get("located_in_hint"):
             location_uri = kg.get_or_create_uri(entry["located_in_hint"], "Location", triples)
             triples.append(f"{actor_uri} rpg:locatedIn {location_uri} .")
@@ -215,6 +263,8 @@ def map_items(entries: list, kg, triples: list) -> None:
             _add_descriptive(kg, seen, item_uri, "physicalAppearance", entry["physical_appearance"], triples)
         if entry.get("gm_description"):
             _add_descriptive(kg, seen, item_uri, "gmDescription", entry["gm_description"], triples)
+        if entry.get("lore_context"):
+            _add_descriptive(kg, seen, item_uri, "loreContext", entry["lore_context"], triples)
         if entry.get("located_in_hint"):
             # rpg:locatedIn documents Actor as its domain, but RDFS domain/range
             # here is documentation, not an enforced constraint - reusing it for
@@ -265,6 +315,8 @@ def map_plot_hooks(entries: list, kg, triples: list) -> None:
         hook_uri = kg.get_or_create_uri(name, "PlotHook", triples)
         if entry.get("hook_description"):
             _add_descriptive(kg, seen, hook_uri, "gmDescription", entry["hook_description"], triples)
+        if entry.get("status"):
+            triples.append(_literal_triple(hook_uri, "status", entry["status"]))
 
         if entry.get("hook_giver_hint"):
             giver_uri = kg.get_or_create_uri(entry["hook_giver_hint"], "Actor", triples)

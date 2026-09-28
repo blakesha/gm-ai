@@ -8,7 +8,8 @@
       "caused_event": { "type": ["string", "null"] },
       "depends_on_event": { "type": ["string", "null"] },
       "related_location": { "type": ["string", "null"] },
-      "related_actors": { "type": "array", "items": { "type": "string" } }
+      "related_actors": { "type": "array", "items": { "type": "string" } },
+      "scene_context": { "type": ["string", "null"] }
     },
     "required": ["event_name", "description"]
   }

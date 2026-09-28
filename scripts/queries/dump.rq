@@ -1,0 +1,11 @@
+PREFIX rpg: <http://example.org/rpg-ontology#>
+
+# Every entity, its type, name (if any), and each of its other properties/values.
+SELECT ?type ?name ?entity ?predicate ?value
+WHERE {
+  ?entity a ?type .
+  OPTIONAL { ?entity rpg:name ?name }
+  ?entity ?predicate ?value .
+  FILTER (?predicate != <http://www.w3.org/1999/02/22-rdf-syntax-ns#type>)
+}
+ORDER BY ?type ?name ?predicate

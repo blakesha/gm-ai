@@ -16,6 +16,7 @@ Output ONLY valid JSON array (empty array if none found):
   {
     "hook_name": "<short label>",
     "hook_description": "<the hook itself, in enough detail for a GM to build on>",
+    "status": "<'open' if newly offered/unclaimed, 'in_progress' if the party has taken it but it isn't finished, 'resolved' if concluded, 'abandoned' if explicitly turned down/dropped, else null if the passage doesn't say>",
     "hook_giver_hint": "<actor who offers or reveals this, if any, else null>",
     "involves_actor_hint": "<key actor/antagonist this hook centers on, if any, else null>",
     "involves_location_hint": "<location this hook points toward, if any, else null>",

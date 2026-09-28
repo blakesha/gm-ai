@@ -1,0 +1,7 @@
+PREFIX rpg: <http://example.org/rpg-ontology#>
+
+# How many entities of each type exist in the graph.
+SELECT ?type (COUNT(?s) AS ?count)
+WHERE { ?s a ?type }
+GROUP BY ?type
+ORDER BY DESC(?count)

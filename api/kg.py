@@ -63,8 +63,18 @@ class KnowledgeGraphManager:
         return bool(result.get("boolean"))
 
     def search_entities(self, query: str, rdf_type: str = None, limit: int = 10) -> list:
-        """Fuzzy-match `query` against every rpg:name/rpg:alias in the graph
-        and return the best-scoring entities, each with its real `uri`.
+        """Fuzzy-match `query` against every rpg:name/rpg:alias in the graph,
+        plus each entity's rpg:physicalAppearance/rpg:gmDescription, and
+        return the best-scoring entities, each with its real `uri`.
+
+        Entity names are short simplified labels (see mapper.py), so a query
+        that echoes the original source text - e.g. a phrase from a
+        read-aloud passage or a trigger's revealed content - won't match the
+        name at all. Matching descriptions too means that full text stays
+        findable even though it's no longer stuffed into the name itself.
+        A description hit is capped below any real name match so a vague
+        mention in some other entity's notes never outranks the entity the
+        query is actually naming.
 
         The agent must call this before touching an entity by URI - the URI
         scheme (`rpg:<Type>_<sanitized name>`) is an ingestion-time
@@ -82,10 +92,11 @@ class KnowledgeGraphManager:
             type_clause = "?s a ?anyType ."
 
         sparql = f"""{PREFIX}
-        SELECT DISTINCT ?s ?type ?label WHERE {{
+        SELECT DISTINCT ?s ?type ?label ?desc WHERE {{
             {type_clause}
             ?s a ?type .
             {{ ?s rpg:name ?label }} UNION {{ ?s rpg:alias ?label }}
+            OPTIONAL {{ {{ ?s rpg:physicalAppearance ?desc }} UNION {{ ?s rpg:gmDescription ?desc }} }}
         }}"""
         bindings = self.execute_sparql(sparql).get("results", {}).get("bindings", [])
 
@@ -106,10 +117,21 @@ class KnowledgeGraphManager:
             else:
                 label_tokens = set(label_lower.split())
                 overlap = len(query_tokens & label_tokens)
-                if not overlap:
-                    continue
-                score = 40.0 * overlap / len(query_tokens)
+                score = 40.0 * overlap / len(query_tokens) if overlap else 0.0
 
+            desc = b.get("desc", {}).get("value")
+            if desc:
+                desc_lower = desc.lower()
+                if query_lower in desc_lower:
+                    score = max(score, 55.0)
+                else:
+                    desc_tokens = set(re.split(r"\W+", desc_lower))
+                    overlap = len(query_tokens & desc_tokens)
+                    if overlap:
+                        score = max(score, 30.0 * overlap / len(query_tokens))
+
+            if score <= 0.0:
+                continue
             if uri not in best or score > best[uri][0]:
                 best[uri] = (score, b["type"]["value"], label)
 

@@ -5,6 +5,10 @@
     "properties": {
       "hook_name": { "type": "string" },
       "hook_description": { "type": "string" },
+      "status": {
+        "type": ["string", "null"],
+        "enum": ["open", "in_progress", "resolved", "abandoned", null]
+      },
       "hook_giver_hint": { "type": ["string", "null"] },
       "involves_actor_hint": { "type": ["string", "null"] },
       "involves_location_hint": { "type": ["string", "null"] },

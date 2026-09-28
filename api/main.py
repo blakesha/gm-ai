@@ -82,10 +82,11 @@ def run_pass2_list(pass_name: str, chunk_text: str, context_note: str = "") -> l
 
 
 def run_pass2_obj(pass_name: str, chunk_text: str, context_note: str = "") -> dict:
-    """Passes whose schema is a single JSON object - currently just `scene`,
-    since a chunk describes at most one location. (A prior version routed
-    this through run_pass2_list, whose isinstance(list) check silently
-    discarded every scene result - the schema was never a list.)"""
+    """Passes whose schema is a single JSON object - `location` and `scene`,
+    since a chunk describes at most one location and frames at most one
+    encounter. (A prior version routed this through run_pass2_list, whose
+    isinstance(list) check silently discarded every result - the schema was
+    never a list.)"""
     result = call_ollama(_load_prompt(pass_name), _load_schema(pass_name), chunk_text, context_note)
     return result if isinstance(result, dict) else {}
 
@@ -117,7 +118,7 @@ def process_chunk(
     is rarely re-named in every paragraph that takes place inside it.
     """
     extracted = {
-        "scenes": [], "readaloud": [], "triggers": [], "statblocks": [],
+        "locations": [], "scenes": [], "readaloud": [], "triggers": [], "statblocks": [],
         "lore": [], "actors": [], "items": [], "session_events": [], "plot_hooks": [],
     }
 
@@ -127,8 +128,12 @@ def process_chunk(
 
     context_note = _context_note(location_hint, scene_hint)
 
+    location = run_pass2_obj("location", chunk_text, context_note)
+    if location.get("location_name"):
+        extracted["locations"].append(location)
+
     scene = run_pass2_obj("scene", chunk_text, context_note)
-    if scene.get("location_name"):
+    if scene.get("scene_name"):
         extracted["scenes"].append(scene)
 
     parsed = stat_parser.parse(chunk_text, game_system)
@@ -139,12 +144,12 @@ def process_chunk(
 
     extracted["readaloud"] = run_pass2_list("readaloud", chunk_text, context_note)
     extracted["triggers"] = run_pass2_list("trigger", chunk_text, context_note)
-    extracted["lore"] = run_pass2_list("lore", chunk_text)
+    extracted["lore"] = run_pass2_list("lore", chunk_text, context_note)
     extracted["actors"] = run_pass2_list("actor", chunk_text, context_note)
     extracted["items"] = run_pass2_list("item", chunk_text, context_note)
     extracted["plot_hooks"] = run_pass2_list("plot_hook", chunk_text)
 
-    effective_location = scene.get("location_name") or location_hint
+    effective_location = location.get("location_name") or location_hint
     effective_scene = scene.get("scene_name") or scene_hint
     _backfill(extracted["actors"], "located_in_hint", effective_location)
     _backfill(extracted["items"], "located_in_hint", effective_location)
@@ -154,13 +159,17 @@ def process_chunk(
     _backfill(extracted["items"], "scene_context", effective_scene)
     _backfill(extracted["triggers"], "scene_context", effective_scene)
     _backfill(extracted["readaloud"], "scene_context", effective_scene)
+    _backfill(extracted["lore"], "scene_context", effective_scene)
 
     return extracted
 
 
 def insert_extraction(extracted: dict, game_system: str) -> str:
     triples: List[str] = []
+    mapper.map_locations(extracted["locations"], kg_manager, triples)
     mapper.map_scenes(extracted["scenes"], kg_manager, triples)
+    if extracted["locations"] and extracted["scenes"]:
+        mapper.map_hosts_scene(extracted["locations"][-1], extracted["scenes"][-1], kg_manager, triples)
     mapper.map_readaloud(extracted["readaloud"], kg_manager, triples)
     mapper.map_triggers(extracted["triggers"], kg_manager, triples)
     mapper.map_statblocks(extracted["statblocks"], kg_manager, triples, game_system)
@@ -216,10 +225,10 @@ async def ingest_pdf(
     for i, chunk in enumerate(chunker.chunk_document(doc)):
         try:
             extracted = process_chunk(chunk["text"], document_type, game_system, current_location, current_scene)
+            if extracted["locations"]:
+                current_location = extracted["locations"][-1].get("location_name") or current_location
             if extracted["scenes"]:
-                latest_scene = extracted["scenes"][-1]
-                current_location = latest_scene.get("location_name") or current_location
-                current_scene = latest_scene.get("scene_name") or current_scene
+                current_scene = extracted["scenes"][-1].get("scene_name") or current_scene
             details = insert_extraction(extracted, game_system)
             results.append({"chunk_index": i, "status": "success", "details": details})
         except Exception as e:

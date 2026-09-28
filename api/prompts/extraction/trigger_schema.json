@@ -3,6 +3,7 @@
   "items": {
     "type": "object",
     "properties": {
+      "label": { "type": "string" },
       "trigger_condition": { "type": "string" },
       "check_type": { "type": ["string", "null"] },
       "dc_target": { "type": ["integer", "null"] },
@@ -10,11 +11,12 @@
         "type": "string",
         "enum": ["HiddenInfo", "ReadAloudText", "ActorSpawn", "Event", "other"]
       },
+      "reveals_label": { "type": ["string", "null"] },
       "reveals_content": { "type": ["string", "null"] },
       "scene_context": { "type": ["string", "null"] },
       "located_in_hint": { "type": ["string", "null"] },
       "cross_reference": { "type": ["string", "null"] }
     },
-    "required": ["trigger_condition", "reveals_type"]
+    "required": ["label", "trigger_condition", "reveals_type"]
   }
 }

@@ -8,6 +8,7 @@ Output ONLY valid JSON array (empty array if none found):
     "item_name": "<name>",
     "physical_appearance": "<player-visible description, or null>",
     "gm_description": "<GM-only notes: true properties, curses, mechanical effects, or null>",
+    "lore_context": "<brief background/history about this specific item - who made it, who owned it, why it matters - as opposed to a full standalone historical event, or null>",
     "located_in_hint": "<location name if stated or given as current location, else null>",
     "owner_actor_hint": "<name of an actor carrying/guarding this item, if mentioned, else null>",
     "scene_context": "<name of the scene this item is found in, if stated or given as current scene, else null>"

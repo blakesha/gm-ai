@@ -8,6 +8,7 @@ Output ONLY valid JSON array (empty array if none found):
     "actor_name": "<name>",
     "physical_appearance": "<player-visible description, or null>",
     "gm_description": "<GM-only notes: true motive, secret identity, disposition, or null>",
+    "lore_context": "<brief background/history about this specific actor - past deeds, titles, relationships, where they came from - as opposed to a full standalone historical event, or null>",
     "located_in_hint": "<location name if stated or given as current location, else null>",
     "scene_context": "<name of the scene this actor is introduced/spawned in, if stated or given as current scene, else null>"
   }

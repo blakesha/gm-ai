@@ -8,6 +8,7 @@ Output ONLY valid JSON array (empty array if none found):
     "caused_event": "<name of an event this caused, if mentioned, else null>",
     "depends_on_event": "<name of an event this depended on, if mentioned, else null>",
     "related_location": "<location name if mentioned, else null>",
-    "related_actors": ["<names mentioned, if any>"]
+    "related_actors": ["<names mentioned, if any>"],
+    "scene_context": "<name of the current scene given in a CONTEXT line above, if this lore is being surfaced as part of that encounter, else null>"
   }
 ]

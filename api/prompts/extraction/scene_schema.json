@@ -1,15 +1,10 @@
 {
   "type": "object",
   "properties": {
-    "location_name": { "type": "string" },
-    "location_type": {
-      "type": "string",
-      "enum": ["World", "Region", "Location", "Room"]
-    },
-    "physical_appearance": { "type": ["string", "null"] },
+    "scene_name": { "type": ["string", "null"] },
     "gm_description": { "type": ["string", "null"] },
-    "parent_location_hint": { "type": ["string", "null"] },
-    "scene_name": { "type": ["string", "null"] }
+    "caused_event": { "type": ["string", "null"] },
+    "depends_on_event": { "type": ["string", "null"] }
   },
-  "required": ["location_name", "location_type"]
+  "required": ["scene_name"]
 }

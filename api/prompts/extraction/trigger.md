@@ -17,10 +17,12 @@ Do NOT include:
 Output ONLY valid JSON array (empty array if none found):
 [
   {
+    "label": "<a short (3-6 word) unique label for this trigger, e.g. 'False Floor Pit Trap' - NEVER the condition text itself>",
     "trigger_condition": "<what must happen for this to fire>",
     "check_type": "<skill/ability name, or null>",
     "dc_target": <integer, or null>,
     "reveals_type": "HiddenInfo" | "ReadAloudText" | "ActorSpawn" | "Event" | "other",
+    "reveals_label": "<a short (3-6 word) unique label for whatever gets revealed, e.g. 'Hidden Assassin' or 'Secret Passage Description' - NEVER the revealed text itself>",
     "reveals_content": "<the actual secret/consequence/text that gets revealed or triggered>",
     "scene_context": "<real scene name if stated, or the current one given in a CONTEXT line above if nothing contradicts it, else null - never invent a vague description>",
     "located_in_hint": "<real location/room name if stated, or the current one given in a CONTEXT line above, else null>",

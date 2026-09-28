@@ -59,6 +59,7 @@ rpg:contains a rdf:Property ; rdfs:domain rpg:Scene ; rdfs:range rpg:Item .
 rpg:owns a rdf:Property ; rdfs:domain rpg:Actor ; rdfs:range rpg:Item .
 rpg:containsText a rdf:Property ; rdfs:domain rpg:Scene ; rdfs:range rpg:ReadAloudText .
 rpg:containsTrigger a rdf:Property ; rdfs:domain rpg:Scene ; rdfs:range rpg:Trigger .
+rpg:containsEvent a rdf:Property ; rdfs:domain rpg:Scene ; rdfs:range rpg:Event .
 rpg:reveals a rdf:Property ; rdfs:domain rpg:Trigger ; rdfs:range rpg:HiddenInfo .
 rpg:caused a rdf:Property ; rdfs:domain rpg:Event ; rdfs:range rpg:Event .
 rpg:dependsOn a rdf:Property ; rdfs:domain rpg:Event ; rdfs:range rpg:Event .

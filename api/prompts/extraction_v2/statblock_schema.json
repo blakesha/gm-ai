@@ -1,0 +1,20 @@
+{
+  "type": "array",
+  "items": {
+    "type": "object",
+    "properties": {
+      "actor_name": { "type": "string" },
+      "game_system": { "type": ["string", "null"] },
+      "armor_class": { "type": ["string", "null"] },
+      "hit_points": { "type": ["string", "null"] },
+      "hit_dice": { "type": ["string", "null"] },
+      "thac0": { "type": ["string", "null"] },
+      "num_attacks": { "type": ["string", "null"] },
+      "damage": { "type": ["string", "null"] },
+      "movement_rate": { "type": ["string", "null"] },
+      "saving_throw": { "type": ["string", "null"] },
+      "raw_stats": { "type": "string" }
+    },
+    "required": ["actor_name", "raw_stats"]
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "type": "array",
+  "items": {
+    "type": "object",
+    "properties": {
+      "hook_name": { "type": "string" },
+      "hook_description": { "type": "string" },
+      "hook_giver_hint": { "type": ["string", "null"] },
+      "involves_actor_hint": { "type": ["string", "null"] },
+      "involves_location_hint": { "type": ["string", "null"] },
+      "involves_item_hint": { "type": ["string", "null"] }
+    },
+    "required": ["hook_name", "hook_description"]
+  }
+}

@@ -1,0 +1,69 @@
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rpg: <http://example.org/rpg-ontology#> .
+
+rpg:Actor a rdfs:Class .
+rpg:Item a rdfs:Class .
+rpg:Location a rdfs:Class .
+rpg:World rdfs:subClassOf rpg:Location .
+rpg:Region rdfs:subClassOf rpg:Location .
+rpg:Room rdfs:subClassOf rpg:Location .
+rpg:Event a rdfs:Class .
+rpg:HistoricalEvent rdfs:subClassOf rpg:Event .
+rpg:SessionEvent rdfs:subClassOf rpg:Event .
+rpg:Scene rdfs:subClassOf rpg:Event .
+rpg:HiddenInfo a rdfs:Class .
+rpg:ReadAloudText a rdfs:Class .
+rpg:Trigger a rdfs:Class .
+rpg:GameSystem a rdfs:Class .
+rpg:StatBlock a rdfs:Class .
+# An unresolved narrative opportunity (rumor, bounty, patron request, faction
+# goal) a GM can build a new adventure around - distinct from HistoricalEvent
+# (already happened) and Trigger (a conditional bound to a written Scene).
+rpg:PlotHook a rdfs:Class .
+
+rpg:name a rdf:Property ; rdfs:range xsd:string .
+rpg:isPlayerFacing a rdf:Property ; rdfs:range xsd:boolean .
+rpg:isResolved a rdf:Property ; rdfs:range xsd:boolean .
+rpg:status a rdf:Property ; rdfs:range xsd:string .
+rpg:outcome a rdf:Property ; rdfs:range xsd:string .
+rpg:dcTarget a rdf:Property ; rdfs:range xsd:integer .
+rpg:physicalAppearance a rdf:Property ; rdfs:range xsd:string .
+rpg:gmDescription a rdf:Property ; rdfs:range xsd:string .
+rpg:loreContext a rdf:Property ; rdfs:range xsd:string .
+rpg:alias a rdf:Property ; rdfs:range xsd:string .
+
+# Stat block mechanics, kept as strings rather than xsd:integer since values
+# like "22 (4d8+4)" or "15 (chain mail)" don't parse cleanly as plain numbers.
+rpg:armorClass a rdf:Property ; rdfs:domain rpg:StatBlock ; rdfs:range xsd:string .
+rpg:hitPoints a rdf:Property ; rdfs:domain rpg:StatBlock ; rdfs:range xsd:string .
+rpg:hitDice a rdf:Property ; rdfs:domain rpg:StatBlock ; rdfs:range xsd:string .
+rpg:thac0 a rdf:Property ; rdfs:domain rpg:StatBlock ; rdfs:range xsd:string .
+rpg:numAttacks a rdf:Property ; rdfs:domain rpg:StatBlock ; rdfs:range xsd:string .
+rpg:damage a rdf:Property ; rdfs:domain rpg:StatBlock ; rdfs:range xsd:string .
+rpg:movementRate a rdf:Property ; rdfs:domain rpg:StatBlock ; rdfs:range xsd:string .
+rpg:savingThrow a rdf:Property ; rdfs:domain rpg:StatBlock ; rdfs:range xsd:string .
+rpg:quality a rdf:Property ; rdfs:domain rpg:StatBlock ; rdfs:range xsd:string .
+rpg:defenseRating a rdf:Property ; rdfs:domain rpg:StatBlock ; rdfs:range xsd:string .
+
+rpg:locatedIn a rdf:Property, owl:TransitiveProperty ; rdfs:domain rpg:Actor ; rdfs:range rpg:Location .
+rpg:occurredAt a rdf:Property ; rdfs:domain rpg:Event ; rdfs:range rpg:Location .
+rpg:participatedIn a rdf:Property ; rdfs:domain rpg:Actor ; rdfs:range rpg:Event .
+rpg:usesStatBlock a rdf:Property ; rdfs:domain rpg:Actor ; rdfs:range rpg:StatBlock .
+rpg:designedFor a rdf:Property ; rdfs:domain rpg:StatBlock ; rdfs:range rpg:GameSystem .
+rpg:hostsScene a rdf:Property ; rdfs:domain rpg:Location ; rdfs:range rpg:Scene .
+rpg:spawns a rdf:Property ; rdfs:domain rpg:Scene ; rdfs:range rpg:Actor .
+rpg:contains a rdf:Property ; rdfs:domain rpg:Scene ; rdfs:range rpg:Item .
+rpg:owns a rdf:Property ; rdfs:domain rpg:Actor ; rdfs:range rpg:Item .
+rpg:containsText a rdf:Property ; rdfs:domain rpg:Scene ; rdfs:range rpg:ReadAloudText .
+rpg:containsTrigger a rdf:Property ; rdfs:domain rpg:Scene ; rdfs:range rpg:Trigger .
+rpg:reveals a rdf:Property ; rdfs:domain rpg:Trigger ; rdfs:range rpg:HiddenInfo .
+rpg:caused a rdf:Property ; rdfs:domain rpg:Event ; rdfs:range rpg:Event .
+rpg:dependsOn a rdf:Property ; rdfs:domain rpg:Event ; rdfs:range rpg:Event .
+
+rpg:hookGiver a rdf:Property ; rdfs:domain rpg:PlotHook ; rdfs:range rpg:Actor .
+rpg:involvesActor a rdf:Property ; rdfs:domain rpg:PlotHook ; rdfs:range rpg:Actor .
+rpg:involvesLocation a rdf:Property ; rdfs:domain rpg:PlotHook ; rdfs:range rpg:Location .
+rpg:involvesItem a rdf:Property ; rdfs:domain rpg:PlotHook ; rdfs:range rpg:Item .

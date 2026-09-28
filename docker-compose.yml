@@ -1,0 +1,76 @@
+version: '3.8'
+
+services:
+  triplestore:
+    image: docker.io/oxigraph/oxigraph:latest
+    container_name: rpg_graph_db
+    ports:
+      - "7879:7878"
+    volumes:
+      - oxigraph_data:/data
+    command: ["serve", "--location", "/data", "--bind", "0.0.0.0:7878"]
+
+  llm:
+    image: docker.io/ollama/ollama:rocm
+    container_name: local_llm
+    ipc: host
+    environment:
+      - ROCR_VISIBLE_DEVICE=0
+      - HSA_NO_SCRATCH_RECLAIM=1
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    devices:
+      - /dev/kfd:/dev/kfd
+      - /dev/dri:/dev/dri
+    ulimits:
+      memlock: -1
+    security_opt:
+      - seccomp=unconfined
+      - label=disable
+
+  agent-api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: agent_api
+    ports:
+      - "8000:8000"
+    environment:
+      - SPARQL_QUERY=http://triplestore:7878/query
+      - SPARQL_UPDATE=http://triplestore:7878/update
+      - LLM_ENDPOINT=http://llm:11434/api/chat
+      - OLLAMA_MODEL=qwen2.5:14b
+    depends_on:
+      - triplestore
+      - llm
+    volumes:
+      - ./api:/app:z
+
+  web-ui:
+    build:
+      context: ./ui
+      dockerfile: Dockerfile
+    container_name: gm_ui
+    ports:
+      - "8501:8501"
+    environment:
+      - API_URL=http://agent-api:8000
+    depends_on:
+      - agent-api
+    volumes:
+      - ./ui:/app:z
+
+  postman-tester:
+    build:
+      context: ./postman
+      dockerfile: Dockerfile
+    container_name: postman_runner
+    depends_on:
+      - agent-api
+    command: ["tail", "-f", "/dev/null"]
+
+volumes:
+  oxigraph_data:
+  ollama_data:

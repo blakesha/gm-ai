@@ -1,0 +1,17 @@
+{
+  "type": "array",
+  "items": {
+    "type": "object",
+    "properties": {
+      "event_name": { "type": "string" },
+      "description": { "type": "string" },
+      "location_name": { "type": ["string", "null"] },
+      "participating_actors": { "type": "array", "items": { "type": "string" } },
+      "outcome": { "type": ["string", "null"] },
+      "is_resolved": { "type": "boolean" },
+      "caused_event": { "type": ["string", "null"] },
+      "depends_on_event": { "type": ["string", "null"] }
+    },
+    "required": ["event_name", "description"]
+  }
+}

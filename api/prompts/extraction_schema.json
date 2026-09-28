@@ -1,0 +1,70 @@
+{
+  "type": "object",
+  "properties": {
+    "entities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "entity_id": {
+            "type": "string",
+            "description": "A unique temporary ID for this extraction (e.g., e_1)"
+          },
+          "name": {
+            "type": "string",
+            "description": "The exact, canonical name of the entity, stripping leading articles."
+          },
+          "classification_reasoning": {
+            "type": "string",
+            "description": "Briefly explain why this entity fits the chosen type based on the strict rules."
+          },
+          "type": {
+            "type": "string",
+            "enum": ["Actor", "Location", "Scene", "HistoricalEvent", "Faction", "Item", "ReadAloudText", "GameSystem", "Trigger", "HiddenInfo", "Event", "StatBlock", "World", "Region", "Room"]
+          },
+          "gmDescription": {
+            "type": "string",
+            "description": "Extract the mechanical function, raw stat block text, gold value, rules, or GM-only true nature."
+          },
+          "loreContext": {
+            "type": "string",
+            "description": "Extract who made it, historical background, rumors, or cultural significance."
+          },
+          "physicalAppearance": {
+            "type": "string",
+            "description": "Extract sensory details: what it looks, sounds, or smells like, or exact text if ReadAloudText."
+          },
+          "isPlayerFacing": {
+            "type": "boolean",
+            "description": "True if players know this immediately, False if it is a GM secret, Trigger, or HiddenInfo."
+          },
+          "dcTarget": {
+            "type": "integer",
+            "description": "If a check is required, extract ONLY the numeric target value (e.g., 15)."
+          }
+        },
+        "required": ["entity_id", "name", "classification_reasoning", "type"]
+      }
+    },
+    "relationships": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "source_entity_id": {
+            "type": "string"
+          },
+          "predicate": {
+            "type": "string",
+            "enum": ["locatedIn", "involvedIn", "caused", "dependsOn", "leadsTo", "memberOf", "owns", "hasReadAloudText", "relatedTo", "hasStatBlock", "contains"]
+          },
+          "target_entity_id": {
+            "type": "string"
+          }
+        },
+        "required": ["source_entity_id", "predicate", "target_entity_id"]
+      }
+    }
+  },
+  "required": ["entities", "relationships"]
+}

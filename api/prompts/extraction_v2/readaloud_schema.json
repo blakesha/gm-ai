@@ -1,0 +1,13 @@
+{
+  "type": "array",
+  "items": {
+    "type": "object",
+    "properties": {
+      "text": { "type": "string" },
+      "scene_context": { "type": ["string", "null"] },
+      "located_in_hint": { "type": ["string", "null"] },
+      "is_player_facing": { "type": "boolean" }
+    },
+    "required": ["text"]
+  }
+}

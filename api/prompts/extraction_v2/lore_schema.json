@@ -1,0 +1,15 @@
+{
+  "type": "array",
+  "items": {
+    "type": "object",
+    "properties": {
+      "event_name": { "type": "string" },
+      "description": { "type": "string" },
+      "caused_event": { "type": ["string", "null"] },
+      "depends_on_event": { "type": ["string", "null"] },
+      "related_location": { "type": ["string", "null"] },
+      "related_actors": { "type": "array", "items": { "type": "string" } }
+    },
+    "required": ["event_name", "description"]
+  }
+}

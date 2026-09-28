@@ -1,0 +1,26 @@
+{
+  "type": "object",
+  "properties": {
+    "labels": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "SCENE_DESCRIPTION",
+          "READ_ALOUD",
+          "GM_TRIGGER",
+          "HIDDEN_INFO",
+          "STAT_BLOCK",
+          "LORE",
+          "ACTOR_INTRO",
+          "ITEM",
+          "OTHER"
+        ]
+      }
+    },
+    "confidence_notes": {
+      "type": "string"
+    }
+  },
+  "required": ["labels"]
+}

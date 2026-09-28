@@ -1,0 +1,48 @@
+{
+  "info": {
+    "name": "AI Game Master API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "1. Ingest PDF Chunk",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": {
+          "raw": "http://agent-api:8000/ingest",
+          "protocol": "http",
+          "host": ["agent-api"],
+          "port": "8000",
+          "path": ["ingest"]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"chunk_text\": \"1A. The Guard Room. The skeletal guards here are clad in rotting Astral Templar armor. They are mindless and will fight to the death to protect the phylactery hidden beneath the floorboards, a relic of the War of the Severed Hand.\"\n}"
+        }
+      }
+    },
+    {
+      "name": "2. Agent Chat Turn",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": {
+          "raw": "http://agent-api:8000/chat",
+          "protocol": "http",
+          "host": ["agent-api"],
+          "port": "8000",
+          "path": ["chat"]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"game_system\": \"AD&D 2nd Edition\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"I open the door and walk into The Guard Room. What do I see?\"\n    }\n  ]\n}"
+        }
+      }
+    }
+  ]
+}

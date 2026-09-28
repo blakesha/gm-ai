@@ -19,19 +19,19 @@ DEFAULT_GAME_SYSTEM = "AD&D 2nd Edition"
 
 BASE_DIR = Path(__file__).resolve().parent
 PROMPTS_DIR = BASE_DIR / "prompts"
-V2_DIR = PROMPTS_DIR / "extraction_v2"
+EXTRACTION_DIR = PROMPTS_DIR / "extraction"
 
 app = FastAPI(title="AI Game Master API")
 kg_manager = KnowledgeGraphManager()
 
 
 def _load_prompt(name: str) -> str:
-    with open(V2_DIR / f"{name}.md", "r") as f:
+    with open(EXTRACTION_DIR / f"{name}.md", "r") as f:
         return f.read()
 
 
 def _load_schema(name: str) -> dict:
-    with open(V2_DIR / f"{name}_schema.json", "r") as f:
+    with open(EXTRACTION_DIR / f"{name}_schema.json", "r") as f:
         return json.load(f)
 
 

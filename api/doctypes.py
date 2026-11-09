@@ -42,3 +42,14 @@ def detect(path: str, first_pages_text: str) -> str:
         if score > best_score:
             best, best_score = doc_type, score
     return best
+
+
+# Wording hints added to the context of every extraction call for that type.
+HINTS = {
+    "module": "An adventure: areas are keyed by number (e.g. Room #N); read-aloud text is boxed or italic; stat blocks follow encounters.",
+    "campaign": "A multi-part campaign: areas, NPCs, factions and set-piece encounters; read-aloud text is boxed or italic; stat blocks follow encounters.",
+    "bestiary": "A monster reference: each entry describes one creature or creature family. The creature is an actor and its numbers are a stat block; habitat, society and ecology text describes that creature, not named people or places.",
+    "setting": "A setting guide: places, organizations and notable people are described in prose, with few stat blocks and almost no read-aloud boxes. Shops, taverns and landmarks listed under a town are separate locations.",
+    "rules": "Rules or reference text: extract only specific named items, creatures or table entries; rules concepts are not actors, items or locations.",
+    "accessory": "A player/GM accessory (tables, cards, screens, sheets): extract only specific named items, creatures or table entries; rules concepts are not actors, items or locations.",
+}

@@ -5,6 +5,13 @@
 @prefix rpg: <http://example.org/rpg-ontology#> .
 
 rpg:Actor a rdfs:Class .
+# Subclasses of Actor. The triplestore does no RDFS reasoning, so every
+# Organization/Deity is ALSO explicitly typed rpg:Actor - query rpg:Actor to
+# get everything, or the subclass to narrow.
+rpg:Organization rdfs:subClassOf rpg:Actor .
+rpg:Deity rdfs:subClassOf rpg:Actor .
+# A book/adventure an entity was extracted from.
+rpg:SourceDocument a rdfs:Class .
 rpg:Item a rdfs:Class .
 rpg:Location a rdfs:Class .
 rpg:World rdfs:subClassOf rpg:Location .
@@ -68,3 +75,17 @@ rpg:hookGiver a rdf:Property ; rdfs:domain rpg:PlotHook ; rdfs:range rpg:Actor .
 rpg:involvesActor a rdf:Property ; rdfs:domain rpg:PlotHook ; rdfs:range rpg:Actor .
 rpg:involvesLocation a rdf:Property ; rdfs:domain rpg:PlotHook ; rdfs:range rpg:Location .
 rpg:involvesItem a rdf:Property ; rdfs:domain rpg:PlotHook ; rdfs:range rpg:Item .
+
+# Actor kind: "npc" | "creature" (monster type) | "group" | "deity".
+rpg:actorKind a rdf:Property ; rdfs:domain rpg:Actor ; rdfs:range xsd:string .
+# An Actor belonging to / serving a group or deity (Organization or Deity).
+rpg:memberOf a rdf:Property ; rdfs:domain rpg:Actor ; rdfs:range rpg:Actor .
+# Item kind: magic_item | treasure | weapon | armor | tool | container | document | consumable | other.
+rpg:itemType a rdf:Property ; rdfs:domain rpg:Item ; rdfs:range xsd:string .
+# Two Locations joined by a door, stair, passage etc. (symmetric: query either direction).
+rpg:connectsTo a rdf:Property, owl:SymmetricProperty ; rdfs:domain rpg:Location ; rdfs:range rpg:Location .
+# Provenance: where in which book an entity was found. May have several values
+# (an entity is usually mentioned in more than one place).
+rpg:foundIn a rdf:Property ; rdfs:range rpg:SourceDocument .
+rpg:foundOnPage a rdf:Property ; rdfs:range xsd:integer .
+rpg:foundInSection a rdf:Property ; rdfs:range xsd:string .

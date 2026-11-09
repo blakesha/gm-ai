@@ -3,16 +3,66 @@
   "items": {
     "type": "object",
     "properties": {
-      "location_name": { "type": "string" },
+      "location_name": {
+        "type": "string"
+      },
       "location_type": {
         "type": "string",
-        "enum": ["World", "Region", "Location", "Room"]
+        "enum": [
+          "World",
+          "Region",
+          "Location",
+          "Room"
+        ]
       },
-      "physical_appearance": { "type": ["string", "null"] },
-      "gm_description": { "type": ["string", "null"] },
-      "lore_context": { "type": ["string", "null"] },
-      "parent_location_hint": { "type": ["string", "null"] }
+      "physical_appearance": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "gm_description": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "lore_context": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "parent_location_hint": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "exits": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "leads_to": {
+              "type": "string"
+            },
+            "direction": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "leads_to"
+          ]
+        }
+      }
     },
-    "required": ["location_name", "location_type"]
+    "required": [
+      "location_name",
+      "location_type"
+    ]
   }
 }

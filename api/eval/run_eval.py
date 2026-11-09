@@ -57,6 +57,7 @@ def extract(model, use_context, limit):
     """Run the pipeline (filters OFF) and return raw per-chunk predictions."""
     main.OLLAMA_MODEL = model
     main.EXTRACT_FILTER = "none"
+    main.GLEAN = set()  # raw = first-pass only; follow-up applied separately with --glean
     raw, secs = [], 0.0
     for doc in SAMPLE:
         dtype = doc["type"]

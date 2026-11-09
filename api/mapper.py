@@ -52,6 +52,55 @@ def _clean_int(value) -> str:
     return re.sub(r"[^0-9]", "", str(value))
 
 
+class TrackingKG:
+    """Wraps a KnowledgeGraphManager and remembers every entity URI resolved
+    through it, so provenance can be attached to exactly the entities one
+    chunk touched (new or already existing) without threading a list through
+    every map_* function."""
+
+    def __init__(self, kg):
+        self._kg = kg
+        self.touched = set()
+
+    def get_or_create_uri(self, name, rdf_type, triples):
+        uri = self._kg.get_or_create_uri(name, rdf_type, triples)
+        self.touched.add(uri)
+        return uri
+
+    def __getattr__(self, attr):
+        return getattr(self._kg, attr)
+
+
+def map_provenance(kg, source: dict, triples: list) -> None:
+    """Link every entity this chunk touched to its SourceDocument, page and
+    section. `source` = {"title", "page", "section"}."""
+    if not source or not source.get("title"):
+        return
+    touched = set(kg.touched)
+    doc_uri = kg.get_or_create_uri(source["title"], "SourceDocument", triples)
+    for uri in sorted(touched - {doc_uri}):
+        triples.append(f"{uri} rpg:foundIn {doc_uri} .")
+        if source.get("page"):
+            triples.append(f"{uri} rpg:foundOnPage {int(source['page'])} .")
+        if source.get("section"):
+            triples.append(f'{uri} rpg:foundInSection "{escape_literal(source["section"])}" .')
+
+
+_NULLISH = {"", "null", "none", "n/a", "na", "unknown", "nil", "-", "undefined"}
+
+
+def _clean_hint(value):
+    """Models sometimes emit the string "null"/"none" instead of JSON null."""
+    v = (str(value).strip() if value is not None else "")
+    return None if v.lower() in _NULLISH else v
+
+
+ACTOR_KINDS = {"npc", "creature", "group", "deity"}
+KIND_CLASS = {"group": "Organization", "deity": "Deity"}
+ITEM_TYPES = {"magic_item", "treasure", "weapon", "armor", "tool", "container", "document", "consumable", "other"}
+GENERIC_EXIT_TARGETS = {"north", "south", "east", "west", "up", "down", "above", "below", "corridor", "passage",
+                        "hall", "hallway", "door", "stairs", "stair", "room", "area", "tunnel", "exit", "outside"}
+
 LOCATION_TYPES = {"World", "Region", "Location", "Room"}
 
 
@@ -77,6 +126,12 @@ def map_locations(locations: list, kg, triples: list) -> None:
         if location.get("parent_location_hint"):
             parent_uri = kg.get_or_create_uri(location["parent_location_hint"], "Location", triples)
             triples.append(f"{location_uri} rpg:locatedIn {parent_uri} .")
+        for exit_ in location.get("exits") or []:
+            target = _clean_hint(exit_.get("leads_to")) or ""
+            if not target or target.lower() in GENERIC_EXIT_TARGETS or target.lower() == name.strip().lower():
+                continue
+            target_uri = kg.get_or_create_uri(target, "Location", triples)
+            triples.append(f"{location_uri} rpg:connectsTo {target_uri} .")
 
 
 def map_scenes(scenes: list, kg, triples: list) -> None:
@@ -238,6 +293,17 @@ def map_actors(entries: list, kg, triples: list) -> None:
         if not name:
             continue
         actor_uri = kg.get_or_create_uri(name, "Actor", triples)
+        kind = entry.get("actor_kind")
+        if kind in ACTOR_KINDS and ("kind", actor_uri) not in seen:
+            seen.add(("kind", actor_uri))
+            if not kg.has_property(actor_uri, "actorKind"):
+                triples.append(f'{actor_uri} rpg:actorKind "{kind}" .')
+            if kind in KIND_CLASS:
+                triples.append(f"{actor_uri} a rpg:{KIND_CLASS[kind]} .")
+        affiliation = _clean_hint(entry.get("affiliation_hint")) or ""
+        if affiliation and affiliation.lower() != name.strip().lower():
+            group_uri = kg.get_or_create_uri(affiliation, "Actor", triples)
+            triples.append(f"{actor_uri} rpg:memberOf {group_uri} .")
         if entry.get("physical_appearance"):
             _add_descriptive(kg, seen, actor_uri, "physicalAppearance", entry["physical_appearance"], triples)
         if entry.get("gm_description"):
@@ -259,6 +325,11 @@ def map_items(entries: list, kg, triples: list) -> None:
         if not name:
             continue
         item_uri = kg.get_or_create_uri(name, "Item", triples)
+        item_type = entry.get("item_type")
+        if item_type in ITEM_TYPES and ("itype", item_uri) not in seen:
+            seen.add(("itype", item_uri))
+            if not kg.has_property(item_uri, "itemType"):
+                triples.append(f'{item_uri} rpg:itemType "{item_type}" .')
         if entry.get("physical_appearance"):
             _add_descriptive(kg, seen, item_uri, "physicalAppearance", entry["physical_appearance"], triples)
         if entry.get("gm_description"):

@@ -21,9 +21,12 @@ OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1")
 # Ollama's default context window is only a few thousand tokens; with the
 # extraction prompt + JSON schema + chunk, input was being silently truncated.
 OLLAMA_NUM_CTX = int(os.getenv("OLLAMA_NUM_CTX", "16384"))
+# Cap on generated tokens per call: a constrained-JSON array can loop forever on
+# a model that never closes it, hanging a chunk until the HTTP timeout.
+OLLAMA_NUM_PREDICT = int(os.getenv("OLLAMA_NUM_PREDICT", "3000"))
 EXTRACT_FILTER = os.getenv("EXTRACT_FILTER", "grounding")     # none | grounding | llm | both (llm verifier hurt in evals)
 FILTER_MODEL = os.getenv("OLLAMA_FILTER_MODEL") or None        # defaults to the extraction model
-GLEAN = {x for x in os.getenv("EXTRACT_GLEAN", "actors").split(",") if x}   # follow-up pass; items/locations made them worse in evals
+GLEAN = {x for x in os.getenv("EXTRACT_GLEAN", "").split(",") if x}   # follow-up pass; off by default (no gain once actor_kind/type hints were added)
 LIBRARY_DIR = Path(os.getenv("LIBRARY_DIR", "/library"))
 JOBS_DB = os.getenv("JOBS_DB", "/data/jobs.db")
 DEFAULT_GAME_SYSTEM = "AD&D 2nd Edition"
@@ -62,8 +65,11 @@ def get_agent_system_prompt(game_system: str) -> str:
 
 
 def _context_note(location_hint: Optional[str], scene_hint: Optional[str],
-                  section: Optional[str] = None, brief: Optional[str] = None) -> str:
+                  section: Optional[str] = None, brief: Optional[str] = None,
+                  type_hint: Optional[str] = None) -> str:
     lines = []
+    if type_hint:
+        lines.append(f"DOCUMENT TYPE: {type_hint}")
     if brief:
         lines.append(f"DOCUMENT: {brief}")
     if section:
@@ -84,14 +90,14 @@ def call_ollama(system_prompt: str, schema: dict, chunk_text: str, context_note:
         "model": model or OLLAMA_MODEL,
         "format": schema,
         "think": False,
-        "options": {"temperature": 0, "num_ctx": OLLAMA_NUM_CTX},
+        "options": {"temperature": 0, "num_ctx": OLLAMA_NUM_CTX, "num_predict": OLLAMA_NUM_PREDICT},
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": raw_user or f'{context_note}PASSAGE:\n"""\n{chunk_text}\n"""'},
         ],
         "stream": False,
     }
-    response = requests.post(LLM_ENDPOINT, json=payload, timeout=900).json()
+    response = requests.post(LLM_ENDPOINT, json=payload, timeout=600).json()
     if "error" in response:
         raise RuntimeError(f"Ollama error: {response['error']}")
     if stats is not None:  # benchmark hook: accumulate Ollama timing/token counters
@@ -102,7 +108,12 @@ def call_ollama(system_prompt: str, schema: dict, chunk_text: str, context_note:
     if raw.startswith("```"):
         raw = re.sub(r"^```(?:json)?\n?", "", raw)
         raw = re.sub(r"\n?```$", "", raw)
-    return json.loads(raw)
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        # Hit the num_predict cap (runaway array) or malformed output: salvage
+        # nothing rather than failing the whole chunk; callers treat None as empty.
+        return None
 
 
 def run_pass2_list(pass_name: str, chunk_text: str, context_note: str = "") -> list:
@@ -204,7 +215,7 @@ def process_chunk(
     if document_type not in doctypes.PASSES:  # "auto" or unknown, e.g. manual text ingest
         document_type = "module"
     enabled = doctypes.PASSES[document_type]
-    context_note = _context_note(location_hint, scene_hint, section, brief)
+    context_note = _context_note(location_hint, scene_hint, section, brief, doctypes.HINTS.get(document_type))
 
     location, scene = {}, {}
     if "location" in enabled:
@@ -234,6 +245,15 @@ def process_chunk(
             extracted[key] = run_pass2_list(name, chunk_text, context_note)
     if "plot_hook" in enabled:
         extracted["plot_hooks"] = run_pass2_list("plot_hook", chunk_text, context_note)
+
+    for key, field in (("actors", "actor_name"), ("items", "item_name")):  # repeats within a chunk
+        seen_names, unique = set(), []
+        for e in extracted[key]:
+            k = (e.get(field) or "").strip().lower()
+            if k and k not in seen_names:
+                seen_names.add(k)
+                unique.append(e)
+        extracted[key] = unique
 
     for key, pass_name in (("actors", "actor"), ("items", "item"), ("locations", "location")):
         if key in GLEAN and pass_name in enabled:
@@ -265,20 +285,23 @@ def process_chunk(
     return extracted
 
 
-def insert_extraction(extracted: dict, game_system: str) -> str:
+def insert_extraction(extracted: dict, game_system: str, source: Optional[dict] = None) -> str:
     triples: List[str] = []
-    mapper.map_locations(extracted["locations"], kg_manager, triples)
-    mapper.map_scenes(extracted["scenes"], kg_manager, triples)
+    tkg = mapper.TrackingKG(kg_manager)
+    mapper.map_locations(extracted["locations"], tkg, triples)
+    mapper.map_scenes(extracted["scenes"], tkg, triples)
     if extracted["locations"] and extracted["scenes"]:
-        mapper.map_hosts_scene(extracted["locations"][-1], extracted["scenes"][-1], kg_manager, triples)
-    mapper.map_readaloud(extracted["readaloud"], kg_manager, triples)
-    mapper.map_triggers(extracted["triggers"], kg_manager, triples)
-    mapper.map_statblocks(extracted["statblocks"], kg_manager, triples, game_system)
-    mapper.map_lore(extracted["lore"], kg_manager, triples)
-    mapper.map_actors(extracted["actors"], kg_manager, triples)
-    mapper.map_items(extracted["items"], kg_manager, triples)
-    mapper.map_session_events(extracted["session_events"], kg_manager, triples)
-    mapper.map_plot_hooks(extracted["plot_hooks"], kg_manager, triples)
+        mapper.map_hosts_scene(extracted["locations"][-1], extracted["scenes"][-1], tkg, triples)
+    mapper.map_readaloud(extracted["readaloud"], tkg, triples)
+    mapper.map_triggers(extracted["triggers"], tkg, triples)
+    mapper.map_statblocks(extracted["statblocks"], tkg, triples, game_system)
+    mapper.map_lore(extracted["lore"], tkg, triples)
+    mapper.map_actors(extracted["actors"], tkg, triples)
+    mapper.map_items(extracted["items"], tkg, triples)
+    mapper.map_session_events(extracted["session_events"], tkg, triples)
+    mapper.map_plot_hooks(extracted["plot_hooks"], tkg, triples)
+
+    mapper.map_provenance(tkg, source, triples)
 
     if not triples:
         return "No new entities found."
@@ -325,12 +348,14 @@ async def ingest_pdf(
     current_location, current_scene = None, None
     for i, chunk in enumerate(chunker.chunk_document(doc)):
         try:
-            extracted = process_chunk(chunk["text"], document_type, game_system, current_location, current_scene)
+            extracted = process_chunk(chunk["text"], document_type, game_system, current_location, current_scene,
+                                      section=chunk.get("section"))
             if extracted["locations"]:
                 current_location = extracted["locations"][-1].get("location_name") or current_location
             if extracted["scenes"]:
                 current_scene = extracted["scenes"][-1].get("scene_name") or current_scene
-            details = insert_extraction(extracted, game_system)
+            details = insert_extraction(extracted, game_system, source={
+                "title": Path(file.filename).stem, "page": chunk.get("page"), "section": chunk.get("section")})
             results.append({"chunk_index": i, "status": "success", "details": details})
         except Exception as e:
             results.append({"chunk_index": i, "status": "error", "details": str(e)})
@@ -388,7 +413,8 @@ def process_job(job: dict, store: jobs.JobStore) -> None:
                 current_location = extracted["locations"][-1].get("location_name") or current_location
             if extracted["scenes"]:
                 current_scene = extracted["scenes"][-1].get("scene_name") or current_scene
-            insert_extraction(extracted, job["game_system"])
+            insert_extraction(extracted, job["game_system"], source={
+                "title": Path(job["path"]).stem, "page": chunk.get("page"), "section": chunk.get("section")})
         except Exception as e:
             errors += 1
             store.update(job["id"], last_error=f"chunk {i}: {e}"[:2000])

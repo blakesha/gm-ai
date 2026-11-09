@@ -23,6 +23,7 @@ OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1")
 OLLAMA_NUM_CTX = int(os.getenv("OLLAMA_NUM_CTX", "16384"))
 EXTRACT_FILTER = os.getenv("EXTRACT_FILTER", "grounding")     # none | grounding | llm | both (llm verifier hurt in evals)
 FILTER_MODEL = os.getenv("OLLAMA_FILTER_MODEL") or None        # defaults to the extraction model
+GLEAN = {x for x in os.getenv("EXTRACT_GLEAN", "actors").split(",") if x}   # follow-up pass; items/locations made them worse in evals
 LIBRARY_DIR = Path(os.getenv("LIBRARY_DIR", "/library"))
 JOBS_DB = os.getenv("JOBS_DB", "/data/jobs.db")
 DEFAULT_GAME_SYSTEM = "AD&D 2nd Edition"
@@ -119,6 +120,34 @@ def run_pass2_obj(pass_name: str, chunk_text: str, context_note: str = "") -> di
     return result if isinstance(result, dict) else {}
 
 
+GLEAN_NOTE = (
+    "\n\nA first extraction pass already produced the entries listed under ALREADY FOUND. Return ONLY additional "
+    "entries that appear in the PASSAGE but are missing from that list (same rules and format). Do not repeat "
+    "anything already found, even under another spelling. Return an empty array if nothing is missing."
+)
+
+PASS_NAME_FIELD = {"actor": "actor_name", "item": "item_name", "location": "location_name"}
+
+
+def glean_pass(pass_name: str, chunk_text: str, found_names: list, context_note: str = "",
+               model: Optional[str] = None) -> list:
+    """Follow-up pass: show the model what the first pass found and ask only
+    for what it missed. Returns new entries, de-duplicated against `found_names`."""
+    listing = "\n".join(f"- {n}" for n in found_names) or "(none)"
+    user = f'{context_note}PASSAGE:\n"""\n{chunk_text}\n"""\n\nALREADY FOUND:\n{listing}'
+    result = call_ollama(_load_prompt(pass_name) + GLEAN_NOTE, _load_schema(pass_name), "", "",
+                         model=model, raw_user=user)
+    field = PASS_NAME_FIELD[pass_name]
+    known = {n.strip().lower() for n in found_names if n}
+    out = []
+    for entry in result if isinstance(result, list) else []:
+        key = (entry.get(field) or "").strip().lower()
+        if key and key not in known:
+            known.add(key)
+            out.append(entry)
+    return out
+
+
 def make_brief(doc, title: str) -> str:
     """~100-word description of the whole document (from its title, table of
     contents and opening pages), passed into every extraction call so a
@@ -205,6 +234,12 @@ def process_chunk(
             extracted[key] = run_pass2_list(name, chunk_text, context_note)
     if "plot_hook" in enabled:
         extracted["plot_hooks"] = run_pass2_list("plot_hook", chunk_text, context_note)
+
+    for key, pass_name in (("actors", "actor"), ("items", "item"), ("locations", "location")):
+        if key in GLEAN and pass_name in enabled:
+            field = PASS_NAME_FIELD[pass_name]
+            extracted[key].extend(glean_pass(
+                pass_name, chunk_text, [e.get(field) for e in extracted[key]], context_note))
 
     mode = EXTRACT_FILTER
     if mode in ("grounding", "both"):

@@ -102,6 +102,35 @@ def refilter(raw, mode, filter_model):
     return out, secs
 
 
+def rerun_and_glean(raw, rerun_cats, glean_cats, model):
+    """Re-extract some categories with the CURRENT prompt files and/or run the
+    follow-up pass on top of the saved first-pass names. Returns raw records."""
+    main.OLLAMA_MODEL = model
+    chunks = {c["id"]: c for d in SAMPLE for c in d["chunks"]}
+    briefs = {}
+    one = {"actors": "actor", "items": "item", "locations": "location"}
+    fld = {"actors": "actor_name", "items": "item_name", "locations": "location_name"}
+    out, t0 = [], time.time()
+    for r in raw:
+        c = chunks[r["id"]]
+        doc = next(d for d in SAMPLE if any(x["id"] == r["id"] for x in d["chunks"]))
+        if doc["pdf"] not in briefs:
+            briefs[doc["pdf"]] = main.make_brief(pymupdf.open("/library/D&D/" + doc["pdf"]), doc["pdf"].split("/")[-1][:-4])
+        note = main._context_note(None, None, c["section"], briefs[doc["pdf"]])
+        pred = dict(r["pred"])
+        enabled = doctypes.PASSES[r["type"]]
+        for cat in rerun_cats:
+            if one[cat] in enabled:
+                pred[cat] = [e.get(fld[cat]) for e in main.run_pass2_list(one[cat], c["text"], note)]
+        for cat in glean_cats:
+            if one[cat] in enabled:
+                new = main.glean_pass(one[cat], c["text"], pred[cat], note)
+                pred[cat] = pred[cat] + [e.get(fld[cat]) for e in new]
+                pred.setdefault("glean_added", {})[cat] = [e.get(fld[cat]) for e in new]
+        out.append({**r, "pred": pred})
+    return out, time.time() - t0
+
+
 def score(raw):
     totals = {}
     for r in raw:
@@ -155,8 +184,21 @@ if __name__ == "__main__":
     ap.add_argument("--refilter", help="saved raw json to re-score with a filter instead of extracting")
     ap.add_argument("--mode", default="both", choices=["none", "grounding", "llm", "both"])
     ap.add_argument("--filter-model", default="qwen2.5:14b")
+    ap.add_argument("--rerun", default="", help="comma list of actors,items,locations to re-extract with current prompts")
+    ap.add_argument("--glean", default="", help="comma list of categories to run the follow-up pass on")
+    ap.add_argument("--model", default="qwen2.5:14b", help="model for --rerun/--glean")
     a = ap.parse_args()
-    if a.refilter:
+    if a.refilter and (a.rerun or a.glean):
+        raw = json.load(open(a.refilter))
+        raw, secs = rerun_and_glean(raw, [x for x in a.rerun.split(",") if x], [x for x in a.glean.split(",") if x], a.model)
+        if a.mode != "none":
+            raw, _ = refilter(raw, a.mode, a.filter_model)
+        tag = f"rerun={a.rerun or '-'} glean={a.glean or '-'} filter={a.mode}"
+        json.dump(raw, open(f"/tmp/eval_{a.model.replace(':', '_')}_{tag.replace(' ', '_').replace('=', '-').replace(',', '+')}.json", "w"), indent=1)
+        report(f"{a.refilter.split('/')[-1]} {tag}", score(raw), f"(+{secs / len(raw):.1f} s/chunk)")
+        added = [(r["id"][-12:], r["pred"].get("glean_added")) for r in raw if r["pred"].get("glean_added")]
+        print("glean examples:", added[:6])
+    elif a.refilter:
         raw = json.load(open(a.refilter))
         if a.mode != "none":
             raw, secs = refilter(raw, a.mode, a.filter_model)

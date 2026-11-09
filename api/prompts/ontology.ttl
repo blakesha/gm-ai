@@ -82,7 +82,8 @@ rpg:actorKind a rdf:Property ; rdfs:domain rpg:Actor ; rdfs:range xsd:string .
 rpg:memberOf a rdf:Property ; rdfs:domain rpg:Actor ; rdfs:range rpg:Actor .
 # Item kind: magic_item | treasure | weapon | armor | tool | container | document | consumable | other.
 rpg:itemType a rdf:Property ; rdfs:domain rpg:Item ; rdfs:range xsd:string .
-# Two Locations joined by a door, stair, passage etc. (symmetric: query either direction).
+# Two Locations joined by a door, stair, passage etc. Stored once, in one direction only;
+# the store does no inference, so query it as (rpg:connectsTo|^rpg:connectsTo).
 rpg:connectsTo a rdf:Property, owl:SymmetricProperty ; rdfs:domain rpg:Location ; rdfs:range rpg:Location .
 # Provenance: where in which book an entity was found. May have several values
 # (an entity is usually mentioned in more than one place).

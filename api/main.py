@@ -4,17 +4,27 @@ import json
 import requests
 from pathlib import Path
 import pymupdf
-from fastapi import FastAPI, UploadFile, File, Form
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from pydantic import BaseModel
 from typing import List, Dict, Optional
 
 import chunker
+import extract_filter
+import doctypes
+import jobs
 import mapper
 import stat_parser
 from kg import KnowledgeGraphManager, PREFIX
 
 LLM_ENDPOINT = os.getenv("LLM_ENDPOINT", "http://llm:11434/api/chat")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1")
+# Ollama's default context window is only a few thousand tokens; with the
+# extraction prompt + JSON schema + chunk, input was being silently truncated.
+OLLAMA_NUM_CTX = int(os.getenv("OLLAMA_NUM_CTX", "16384"))
+EXTRACT_FILTER = os.getenv("EXTRACT_FILTER", "grounding")     # none | grounding | llm | both (llm verifier hurt in evals)
+FILTER_MODEL = os.getenv("OLLAMA_FILTER_MODEL") or None        # defaults to the extraction model
+LIBRARY_DIR = Path(os.getenv("LIBRARY_DIR", "/library"))
+JOBS_DB = os.getenv("JOBS_DB", "/data/jobs.db")
 DEFAULT_GAME_SYSTEM = "AD&D 2nd Edition"
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -25,9 +35,16 @@ app = FastAPI(title="AI Game Master API")
 kg_manager = KnowledgeGraphManager()
 
 
+CONTEXT_PREAMBLE = (
+    "\n\nThe user message may begin with DOCUMENT (what the whole book is), SECTION (where this passage sits "
+    "in the book: chapter > heading > room) and CONTEXT lines. Use them only to disambiguate names, places and "
+    "scenes; extract only what the PASSAGE itself states."
+)
+
+
 def _load_prompt(name: str) -> str:
     with open(EXTRACTION_DIR / f"{name}.md", "r") as f:
-        return f.read()
+        return f.read() + CONTEXT_PREAMBLE
 
 
 def _load_schema(name: str) -> dict:
@@ -43,31 +60,43 @@ def get_agent_system_prompt(game_system: str) -> str:
     return template.replace("{{GAME_SYSTEM}}", game_system).replace("{{ONTOLOGY}}", ontology)
 
 
-def _context_note(location_hint: Optional[str], scene_hint: Optional[str]) -> str:
+def _context_note(location_hint: Optional[str], scene_hint: Optional[str],
+                  section: Optional[str] = None, brief: Optional[str] = None) -> str:
+    lines = []
+    if brief:
+        lines.append(f"DOCUMENT: {brief}")
+    if section:
+        lines.append(f"SECTION: {section}")
     if not location_hint and not scene_hint:
-        return ""
+        return ("\n".join(lines) + "\n\n") if lines else ""
     parts = []
     if location_hint:
         parts.append(f'current location = "{location_hint}"')
     if scene_hint:
         parts.append(f'current scene = "{scene_hint}"')
-    return f"CONTEXT: {', '.join(parts)}\n\n"
+    lines.append(f"CONTEXT: {', '.join(parts)}")
+    return "\n".join(lines) + "\n\n"
 
 
-def call_ollama(system_prompt: str, schema: dict, chunk_text: str, context_note: str = ""):
+def call_ollama(system_prompt: str, schema: dict, chunk_text: str, context_note: str = "", model: Optional[str] = None, stats: Optional[dict] = None, raw_user: Optional[str] = None):
     payload = {
-        "model": OLLAMA_MODEL,
+        "model": model or OLLAMA_MODEL,
         "format": schema,
-        "options": {"temperature": 0},
+        "think": False,
+        "options": {"temperature": 0, "num_ctx": OLLAMA_NUM_CTX},
         "messages": [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f'{context_note}PASSAGE:\n"""\n{chunk_text}\n"""'},
+            {"role": "user", "content": raw_user or f'{context_note}PASSAGE:\n"""\n{chunk_text}\n"""'},
         ],
         "stream": False,
     }
-    response = requests.post(LLM_ENDPOINT, json=payload).json()
+    response = requests.post(LLM_ENDPOINT, json=payload, timeout=900).json()
     if "error" in response:
         raise RuntimeError(f"Ollama error: {response['error']}")
+    if stats is not None:  # benchmark hook: accumulate Ollama timing/token counters
+        for k in ("prompt_eval_count", "eval_count", "eval_duration", "total_duration"):
+            stats[k] = stats.get(k, 0) + response.get(k, 0)
+        stats["max_prompt_tokens"] = max(stats.get("max_prompt_tokens", 0), response.get("prompt_eval_count", 0))
     raw = response["message"]["content"].strip()
     if raw.startswith("```"):
         raw = re.sub(r"^```(?:json)?\n?", "", raw)
@@ -82,13 +111,28 @@ def run_pass2_list(pass_name: str, chunk_text: str, context_note: str = "") -> l
 
 
 def run_pass2_obj(pass_name: str, chunk_text: str, context_note: str = "") -> dict:
-    """Passes whose schema is a single JSON object - `location` and `scene`,
-    since a chunk describes at most one location and frames at most one
-    encounter. (A prior version routed this through run_pass2_list, whose
+    """Passes whose schema is a single JSON object - `scene`, since a chunk
+    frames at most one encounter. (A prior version routed this through run_pass2_list, whose
     isinstance(list) check silently discarded every result - the schema was
     never a list.)"""
     result = call_ollama(_load_prompt(pass_name), _load_schema(pass_name), chunk_text, context_note)
     return result if isinstance(result, dict) else {}
+
+
+def make_brief(doc, title: str) -> str:
+    """~100-word description of the whole document (from its title, table of
+    contents and opening pages), passed into every extraction call so a
+    chunk is read knowing what book/adventure it belongs to."""
+    toc = "; ".join(t for _, t, _ in doc.get_toc()[:40])
+    opening = " ".join(doc[i].get_text() for i in range(min(4, len(doc))))[:5000]
+    prompt = (f"Title: {title}\nTable of contents: {toc or '(none)'}\nOpening pages:\n{opening}\n\n"
+              "In at most 90 words, say what this tabletop RPG document is (adventure, setting, rules, bestiary...), "
+              "its game system, the main place/premise/factions, and how it is organised. No preamble.")
+    resp = requests.post(LLM_ENDPOINT, json={
+        "model": OLLAMA_MODEL, "stream": False, "think": False,
+        "options": {"temperature": 0, "num_ctx": OLLAMA_NUM_CTX},
+        "messages": [{"role": "user", "content": prompt}]}, timeout=900).json()
+    return " ".join(resp.get("message", {}).get("content", "").split())[:700]
 
 
 def _backfill(entries: list, field: str, value) -> None:
@@ -105,6 +149,8 @@ def process_chunk(
     game_system: str,
     location_hint: Optional[str] = None,
     scene_hint: Optional[str] = None,
+    section: Optional[str] = None,
+    brief: Optional[str] = None,
 ) -> dict:
     """Runs every Pass 2 extraction prompt on `chunk_text` unconditionally.
     An earlier Pass 1 classifier routed to only some of these per chunk, but
@@ -126,30 +172,50 @@ def process_chunk(
         extracted["session_events"] = run_pass2_list("session_event", chunk_text)
         return extracted
 
-    context_note = _context_note(location_hint, scene_hint)
+    if document_type not in doctypes.PASSES:  # "auto" or unknown, e.g. manual text ingest
+        document_type = "module"
+    enabled = doctypes.PASSES[document_type]
+    context_note = _context_note(location_hint, scene_hint, section, brief)
 
-    location = run_pass2_obj("location", chunk_text, context_note)
-    if location.get("location_name"):
-        extracted["locations"].append(location)
+    location, scene = {}, {}
+    if "location" in enabled:
+        seen_names = set()
+        for loc in run_pass2_list("location", chunk_text, context_note):
+            key = (loc.get("location_name") or "").strip().lower()
+            if key and key not in seen_names:  # drop repeats within a chunk
+                seen_names.add(key)
+                extracted["locations"].append(loc)
+        location = extracted["locations"][0] if extracted["locations"] else {}
 
-    scene = run_pass2_obj("scene", chunk_text, context_note)
-    if scene.get("scene_name"):
-        extracted["scenes"].append(scene)
+    if "scene" in enabled:
+        scene = run_pass2_obj("scene", chunk_text, context_note)
+        if scene.get("scene_name"):
+            extracted["scenes"].append(scene)
 
-    parsed = stat_parser.parse(chunk_text, game_system)
-    if parsed:
-        extracted["statblocks"].append(parsed)
-    else:
-        extracted["statblocks"].extend(run_pass2_list("statblock", chunk_text))
+    if "statblock" in enabled:
+        parsed = stat_parser.parse(chunk_text, game_system)
+        if parsed:
+            extracted["statblocks"].append(parsed)
+        else:
+            extracted["statblocks"].extend(run_pass2_list("statblock", chunk_text))
 
-    extracted["readaloud"] = run_pass2_list("readaloud", chunk_text, context_note)
-    extracted["triggers"] = run_pass2_list("trigger", chunk_text, context_note)
-    extracted["lore"] = run_pass2_list("lore", chunk_text, context_note)
-    extracted["actors"] = run_pass2_list("actor", chunk_text, context_note)
-    extracted["items"] = run_pass2_list("item", chunk_text, context_note)
-    extracted["plot_hooks"] = run_pass2_list("plot_hook", chunk_text)
+    for key, name in [("readaloud", "readaloud"), ("triggers", "trigger"), ("lore", "lore"),
+                      ("actors", "actor"), ("items", "item")]:
+        if name in enabled:
+            extracted[key] = run_pass2_list(name, chunk_text, context_note)
+    if "plot_hook" in enabled:
+        extracted["plot_hooks"] = run_pass2_list("plot_hook", chunk_text, context_note)
 
-    effective_location = location.get("location_name") or location_hint
+    mode = EXTRACT_FILTER
+    if mode in ("grounding", "both"):
+        extract_filter.apply_grounding(chunk_text, section, extracted)
+    if mode in ("llm", "both"):
+        extract_filter.apply_llm_verify(
+            chunk_text, extracted,
+            lambda sp, sc, ut: call_ollama(sp, sc, "", "", model=FILTER_MODEL or OLLAMA_MODEL, raw_user=ut),
+        )
+
+    effective_location = (extracted["locations"][0].get("location_name") if extracted["locations"] else None) or location_hint
     effective_scene = scene.get("scene_name") or scene_hint
     _backfill(extracted["actors"], "located_in_hint", effective_location)
     _backfill(extracted["items"], "located_in_hint", effective_location)
@@ -236,6 +302,157 @@ async def ingest_pdf(
             break
 
     return {"status": "success", "chunks_processed": len(results), "results": results}
+
+
+# ---------------------------------------------------------------------------
+# Library browsing + background ingestion
+# ---------------------------------------------------------------------------
+job_store = jobs.JobStore(JOBS_DB)
+
+
+def _resolve_library_path(rel: str) -> Path:
+    """Map a library-relative path to an absolute one, refusing escapes."""
+    root = LIBRARY_DIR.resolve()
+    target = (root / rel.lstrip("/")).resolve()
+    if target != root and root not in target.parents:
+        raise HTTPException(status_code=400, detail="Path escapes the library")
+    return target
+
+
+def process_job(job: dict, store: jobs.JobStore) -> None:
+    doc = pymupdf.open(job["path"])
+    doc_type = job["document_type"]
+    if doc_type == "auto":
+        doc_type = job.get("detected_type") or doctypes.detect(
+            job["path"], " ".join(doc[i].get_text() for i in range(min(3, len(doc)))))
+        store.update(job["id"], detected_type=doc_type)
+    hints = json.loads(job["hints"] or "{}")
+    current_location, current_scene = hints.get("location"), hints.get("scene")
+    brief = hints.get("brief")
+    if brief is None:
+        try:
+            brief = make_brief(doc, Path(job["path"]).stem)
+        except Exception:
+            brief = ""
+    skip = job["chunks_done"]
+    errors = job["chunk_errors"]
+    chunks = list(chunker.chunk_document(doc))
+    store.update(job["id"], chunks_total=len(chunks))
+
+    for i, chunk in enumerate(chunks):
+        if i < skip:
+            continue
+        if store.get(job["id"])["status"] == "cancelled":
+            return
+        try:
+            extracted = process_chunk(
+                chunk["text"], doc_type, job["game_system"], current_location, current_scene,
+                section=chunk.get("section"), brief=brief,
+            )
+            if extracted["locations"]:
+                current_location = extracted["locations"][-1].get("location_name") or current_location
+            if extracted["scenes"]:
+                current_scene = extracted["scenes"][-1].get("scene_name") or current_scene
+            insert_extraction(extracted, job["game_system"])
+        except Exception as e:
+            errors += 1
+            store.update(job["id"], last_error=f"chunk {i}: {e}"[:2000])
+        store.update(
+            job["id"], chunks_done=i + 1, chunk_errors=errors,
+            hints=json.dumps({"location": current_location, "scene": current_scene, "brief": brief}),
+        )
+
+
+@app.on_event("startup")
+def _start_worker():
+    jobs.Worker(job_store, process_job).start()
+
+
+@app.get("/document_types")
+def document_types():
+    return {"types": doctypes.TYPES}
+
+
+@app.get("/library")
+def browse_library(path: str = ""):
+    target = _resolve_library_path(path)
+    if not target.is_dir():
+        raise HTTPException(status_code=404, detail="Not a directory")
+    entries = []
+    for p in sorted(target.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower())):
+        if p.name.startswith("."):
+            continue
+        if p.is_dir():
+            entries.append({"name": p.name, "type": "dir"})
+        elif p.suffix.lower() == ".pdf":
+            entries.append({"name": p.name, "type": "pdf", "size": p.stat().st_size})
+    return {"path": str(target.relative_to(LIBRARY_DIR.resolve())), "entries": entries}
+
+
+@app.post("/library/upload")
+async def upload_to_library(file: UploadFile = File(...), directory: str = Form("")):
+    target_dir = _resolve_library_path(directory)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    name = Path(file.filename).name
+    dest = target_dir / name
+    with open(dest, "wb") as f:
+        while block := await file.read(1024 * 1024):
+            f.write(block)
+    return {"status": "success", "path": str(dest.relative_to(LIBRARY_DIR.resolve()))}
+
+
+class QueueRequest(BaseModel):
+    paths: List[str]  # library-relative files and/or folders
+    document_type: str = "module"
+    game_system: str = DEFAULT_GAME_SYSTEM
+    recursive: bool = True
+    force: bool = False  # re-process files already ingested unchanged
+
+
+@app.post("/jobs")
+def queue_jobs(request: QueueRequest):
+    pdfs: List[Path] = []
+    for rel in request.paths:
+        target = _resolve_library_path(rel)
+        if target.is_dir():
+            found = target.rglob("*.pdf") if request.recursive else target.glob("*.pdf")
+            pdfs.extend(sorted(p for p in found if not p.name.startswith(".")))
+        elif target.suffix.lower() == ".pdf" and target.is_file():
+            pdfs.append(target)
+    queued, skipped = [], 0
+    for pdf in pdfs:
+        job_id = job_store.enqueue(str(pdf), request.document_type, request.game_system, request.force)
+        if job_id:
+            queued.append(job_id)
+        else:
+            skipped += 1
+    return {"queued": len(queued), "skipped": skipped, "job_ids": queued}
+
+
+@app.get("/jobs")
+def list_jobs(status: Optional[str] = None, limit: int = 200):
+    rows = job_store.list(status, limit)
+    root = str(LIBRARY_DIR.resolve())
+    for r in rows:
+        r["path"] = r["path"].removeprefix(root).lstrip("/")
+        r.pop("hints", None)
+    return {"jobs": rows}
+
+
+@app.post("/jobs/{job_id}/cancel")
+def cancel_job(job_id: int):
+    return {"cancelled": job_store.cancel(job_id)}
+
+
+@app.post("/jobs/{job_id}/retry")
+def retry_job(job_id: int):
+    return {"requeued": job_store.retry(job_id)}
+
+
+@app.post("/jobs/cancel_all")
+def cancel_all():
+    n = sum(job_store.cancel(j["id"]) for j in job_store.list() if j["status"] in ("queued", "running"))
+    return {"cancelled": n}
 
 
 class ChatRequest(BaseModel):

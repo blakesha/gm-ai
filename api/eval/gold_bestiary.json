@@ -1,0 +1,10 @@
+{
+"TSR 2140A Monstrous #111": {"locations": [], "actors": ["catoblepas"], "items": [], "statblocks": [], "readaloud": 0, "triggers": 0},
+"TSR 2140A Monstrous #193": {"locations": [], "actors": ["green dragon"], "items": [], "statblocks": ["Green Dragon"], "readaloud": 0, "triggers": 0},
+"TSR 2140A Monstrous #434": {"locations": [], "actors": ["gith", "thri-kreen"], "items": [], "statblocks": [], "readaloud": 0, "triggers": 0},
+"TSR 2140A Monstrous #616": {"locations": [], "actors": ["kuo-toa", "Sea Mother"], "items": [], "statblocks": [], "readaloud": 0, "triggers": 0},
+"TSR 2140A Monstrous #623": {"locations": [], "actors": ["lamia", "lammasu"], "items": [], "statblocks": ["Lammasu"], "readaloud": 0, "triggers": 0},
+"TSR 2140A Monstrous #639": {"locations": [], "actors": ["demilich"], "items": [], "statblocks": [], "readaloud": 0, "triggers": 0},
+"TSR 2140A Monstrous #649": {"locations": [], "actors": ["lizard men", "lizard king"], "items": [], "statblocks": [], "readaloud": 0, "triggers": 0},
+"TSR 2140A Monstrous #762": {"locations": [], "actors": ["neogi", "umber hulks", "mind flayers", "Great Old Master"], "items": [], "statblocks": [], "readaloud": 0, "triggers": 0}
+}

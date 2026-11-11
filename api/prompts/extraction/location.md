@@ -4,11 +4,15 @@ For each, split what a PLAYER would perceive (physical_appearance) from what onl
 
 If the passage gives only a name for a place, return the name with null descriptions.
 
+location_type: "World" = an entire world/planet only (e.g. Toril); "Region" = a country, forest, sea, mountain range or other wide area; "Settlement" = a village, town or city; "Structure" = a single named building or compound that has an inside - a castle, tower, inn, tavern, shop, smithy, temple, farm, house; "Room" = a keyed area, chamber or interior space within a Structure or dungeon (including numbered entries like "47. Bedroom"); "Landmark" = any other named place (a road, ford, hill, grove, monument). A shop or inn is a Structure, never a Room, even if its entry is numbered. parent_location_hint should name the NEAREST containing place: a room's building, a building's settlement, a settlement's region.
+
+NAMING: use the bare proper name, the same way every time. Write "Shadowdale", not "Shadowdale village" or "the Village of Shadowdale"; "Waterdeep", not "the city of Waterdeep"; "Old Skull Inn" stays as is (inn/castle/tower are part of those names). Never append commentary, explanations or parenthetical asides to a name. If the passage uses a variant, use the form already given in a CONTEXT line, or the shortest proper name.
+
 Output ONLY a valid JSON array (empty array if the passage describes no place):
 [
   {
     "location_name": "<name as written; for numbered keyed areas keep the key, e.g. \"Room #9A: Living Room\">",
-    "location_type": "World" | "Region" | "Location" | "Room",
+    "location_type": "World" | "Region" | "Settlement" | "Structure" | "Landmark" | "Room",
     "physical_appearance": "<player-visible description, or null>",
     "gm_description": "<GM-only knowledge embedded in this passage, or null>",
     "lore_context": "<brief background/history about this specific location - former occupants, past events tied to the place, why it's named as it is - as opposed to a full standalone historical event, or null>",

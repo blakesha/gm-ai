@@ -13,6 +13,8 @@ import extract_filter
 import doctypes
 import jobs
 import mapper
+import context
+import author
 import stat_parser
 from kg import KnowledgeGraphManager, PREFIX
 
@@ -24,6 +26,15 @@ OLLAMA_NUM_CTX = int(os.getenv("OLLAMA_NUM_CTX", "16384"))
 # Cap on generated tokens per call: a constrained-JSON array can loop forever on
 # a model that never closes it, hanging a chunk until the HTTP timeout.
 OLLAMA_NUM_PREDICT = int(os.getenv("OLLAMA_NUM_PREDICT", "3000"))
+# Optional second model that only rewrites the grounded answer in a Game Master
+# voice (e.g. an RPG/roleplay fine-tune). Empty = off: OLLAMA_MODEL answers directly.
+NARRATION_MODEL = os.getenv("NARRATION_MODEL", "").strip()
+NARRATION_TEMPERATURE = float(os.getenv("NARRATION_TEMPERATURE", "0.7"))
+# auto = narrate only generative/in-fiction turns, skip plain factual lookups;
+# always = narrate every reply; off = never
+NARRATION_MODE = os.getenv("NARRATION_MODE", "auto").strip().lower()
+NARRATION_NUM_CTX = int(os.getenv("NARRATION_NUM_CTX", "4096"))  # short prompt; small ctx keeps VRAM free
+NARRATION_HISTORY_TURNS = 4
 EXTRACT_FILTER = os.getenv("EXTRACT_FILTER", "grounding")     # none | grounding | llm | both (llm verifier hurt in evals)
 FILTER_MODEL = os.getenv("OLLAMA_FILTER_MODEL") or None        # defaults to the extraction model
 GLEAN = {x for x in os.getenv("EXTRACT_GLEAN", "").split(",") if x}   # follow-up pass; off by default (no gain once actor_kind/type hints were added)
@@ -36,6 +47,7 @@ PROMPTS_DIR = BASE_DIR / "prompts"
 EXTRACTION_DIR = PROMPTS_DIR / "extraction"
 
 app = FastAPI(title="AI Game Master API")
+app.include_router(author.router)
 kg_manager = KnowledgeGraphManager()
 
 
@@ -519,6 +531,7 @@ def cancel_all():
 class ChatRequest(BaseModel):
     messages: List[Dict[str, str]]
     game_system: str
+    narrate: Optional[bool] = None  # None = auto (narrate scenes, skip factual lookups)
 
 
 AGENT_TOOLS = [
@@ -571,26 +584,124 @@ def _run_tool(name: str, arguments: dict) -> str:
         except Exception as e:
             return f"Search Error: {str(e)}"
     if name == "execute_sparql":
-        query = arguments["query"]
-        is_update = "INSERT" in query.upper() or "DELETE" in query.upper()
+        query = arguments["query"].strip()
+        # Models often forget or mangle the prefix declaration; add it if absent.
+        if not re.search(r"PREFIX\s+rpg:", query, re.IGNORECASE):
+            query = f"{PREFIX}\n{query}"
+        # Ignore keywords that only appear inside string literals.
+        bare = re.sub(r'"(?:[^"\\]|\\.)*"|\'(?:[^\'\\]|\\.)*\'', '""', query)
+        is_update = bool(re.search(r"\b(INSERT|DELETE)\b", bare, re.IGNORECASE))
         try:
             return json.dumps(kg_manager.execute_sparql(query, is_update=is_update))
         except Exception as e:
-            return f"SPARQL Error: {str(e)}"
+            return (f"SPARQL Error: {str(e)[:1500]}\n"
+                    f"Query sent:\n{query}\n"
+                    "Fix the syntax (balanced braces, trailing dots, quoted literals) and retry.")
     return f"Unknown tool: {name}"
+
+
+def _narrate(request: "ChatRequest", last_user: str, grounded: str) -> Optional[str]:
+    """Rewrite the grounded answer in a GM voice with NARRATION_MODEL.
+    Returns None on any failure so the caller falls back to the plain answer."""
+    with open(PROMPTS_DIR / "narration_prompt.md", "r") as f:
+        system = f.read().replace("{{GAME_SYSTEM}}", request.game_system)
+    history = [m for m in request.messages if m.get("role") in ("user", "assistant")][-NARRATION_HISTORY_TURNS:]
+    # the current user turn is passed separately, with the verified answer attached
+    if history and history[-1].get("role") == "user":
+        history = history[:-1]
+    user_turn = (f"{last_user}\n\n---\nVERIFIED ANSWER (the only facts you may use):\n{grounded}\n---\n"
+                 "Deliver this answer to the player as the Game Master.")
+    resp = requests.post(LLM_ENDPOINT, json={
+        "model": NARRATION_MODEL,
+        "messages": [{"role": "system", "content": system}] + history + [{"role": "user", "content": user_turn}],
+        "stream": False,
+        "options": {"temperature": NARRATION_TEMPERATURE, "num_ctx": NARRATION_NUM_CTX},
+    }, timeout=300).json()
+    text = (resp.get("message", {}).get("content") or "").strip()
+    return text or None
+
+
+SCENE_ACTION = re.compile(
+    r"^\s*[\"'“*(]?\s*(i|we|my|our|let's|lets)\b|"
+    r"\b(narrate|roleplay|role-play|what happens|describe (the|what|how) .*(see|enter|look|find|feel)|"
+    r"random event|improvis|continue the (scene|story)|start (the|a) (scene|session|adventure))", re.IGNORECASE)
+
+CLASSIFY_PROMPT = (
+    "Classify the player's latest message to a tabletop Game Master as exactly one word.\n"
+    "FACT = a lookup question about the setting, lore, people, places, factions, items, stats or rules "
+    "(\"Who leads the Harpers?\", \"What do you know about the High Forest?\", \"Where is Shadowdale?\", "
+    "\"What are an orc's hit dice?\").\n"
+    "SCENE = the player acts, speaks in character, or wants story: declares an action (\"I open the door\"), "
+    "talks to an NPC, asks to narrate/describe a scene as they experience it, asks what happens next, "
+    "or wants new events or improvisation.\n"
+    "A message where the player's CHARACTER does or says something in the fiction is SCENE even if it "
+    "ends up seeking information (\"I ask the innkeeper about rumors\", \"I search the room\", "
+    "\"We question the guard\"). A message that steps outside the fiction to ask about the world is FACT.\n"
+    "Answer with FACT or SCENE only.")
+
+
+def _wants_narration(request: "ChatRequest", last_user: str) -> bool:
+    """Narrate generative/in-fiction turns; skip plain factual lookups."""
+    if request.narrate is not None:          # explicit per-request override
+        return request.narrate
+    if NARRATION_MODE == "always":
+        return True
+    if NARRATION_MODE == "off":
+        return False
+    try:
+        prior = next((m["content"] for m in reversed(request.messages[:-1]) if m.get("role") == "assistant"), "")
+        user = (f"Previous GM reply (for context): {prior[:300]}\n\n" if prior else "") + f"Player message: {last_user}"
+        resp = requests.post(LLM_ENDPOINT, json={
+            "model": OLLAMA_MODEL, "stream": False,
+            "messages": [{"role": "system", "content": CLASSIFY_PROMPT}, {"role": "user", "content": user}],
+            "options": {"temperature": 0, "num_ctx": 2048, "num_predict": 4},
+        }, timeout=60).json()
+        verdict = (resp.get("message", {}).get("content") or "").strip().upper()
+        if verdict.startswith("SCENE"):
+            return True
+        if verdict.startswith("FACT"):
+            return False
+    except Exception as exc:
+        print(f"narration classifier failed, using heuristic: {exc}")
+    return bool(SCENE_ACTION.search(last_user))
+
+
+def _finish(message: dict, request: "ChatRequest", last_user: str) -> dict:
+    """Return the chat reply, narrated if a narration model is configured."""
+    grounded = (message.get("content") or "").strip()
+    if not NARRATION_MODEL or not grounded:
+        return {"message": message}
+    narrate = _wants_narration(request, last_user)
+    print(f"narration: {'yes' if narrate else 'skipped (factual)'}")
+    if not narrate:
+        return {"message": message, "narrated_by": None}
+    try:
+        narrated = _narrate(request, last_user, grounded)
+    except Exception as exc:  # narration is cosmetic; never lose the answer
+        print(f"narration failed, returning grounded answer: {exc}")
+        narrated = None
+    if not narrated:
+        return {"message": message}
+    return {"message": {**message, "content": narrated}, "grounded": grounded, "narrated_by": NARRATION_MODEL}
 
 
 @app.post("/chat")
 def agent_chat(request: ChatRequest):
-    messages = [{"role": "system", "content": get_agent_system_prompt(request.game_system)}] + request.messages
+    system_prompt = get_agent_system_prompt(request.game_system)
+    last_user = next((m["content"] for m in reversed(request.messages) if m.get("role") == "user"), "")
+    graph_context = context.retrieve_context(kg_manager, last_user)
+    if graph_context:
+        system_prompt += "\n\n" + graph_context
+    messages = [{"role": "system", "content": system_prompt}] + request.messages
 
     for _ in range(MAX_TOOL_ROUNDS):
-        payload = {"model": OLLAMA_MODEL, "messages": messages, "tools": AGENT_TOOLS, "stream": False}
+        payload = {"model": OLLAMA_MODEL, "messages": messages, "tools": AGENT_TOOLS, "stream": False,
+                   "options": {"temperature": 0, "num_ctx": OLLAMA_NUM_CTX}}
         resp = requests.post(LLM_ENDPOINT, json=payload).json()
         message = resp.get("message", {})
         tool_calls = message.get("tool_calls")
         if not tool_calls:
-            return {"message": message}
+            return _finish(message, request, last_user)
 
         messages.append(message)
         for tool in tool_calls:
@@ -599,5 +710,9 @@ def agent_chat(request: ChatRequest):
 
     # Ran out of tool-call rounds - ask once more without tools so the model
     # is forced to answer from what it already gathered instead of looping forever.
-    final_resp = requests.post(LLM_ENDPOINT, json={"model": OLLAMA_MODEL, "messages": messages, "stream": False}).json()
-    return {"message": final_resp.get("message", {})}
+    messages.append({"role": "system", "content": (
+        "Tool budget used up. Answer now using ONLY the tool results above. State what the knowledge graph "
+        "contained and what it did not; do not add facts from your own memory.")})
+    final_resp = requests.post(LLM_ENDPOINT, json={"model": OLLAMA_MODEL, "messages": messages, "stream": False,
+                                                    "options": {"temperature": 0, "num_ctx": OLLAMA_NUM_CTX}}).json()
+    return _finish(final_resp.get("message", {}), request, last_user)

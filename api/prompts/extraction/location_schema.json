@@ -11,7 +11,9 @@
         "enum": [
           "World",
           "Region",
-          "Location",
+          "Settlement",
+          "Structure",
+          "Landmark",
           "Room"
         ]
       },

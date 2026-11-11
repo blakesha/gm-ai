@@ -4,6 +4,8 @@ Scenery, furniture, architecture and room fixtures (walls, doors, tables, shelve
 
 For located_in_hint and scene_context: use a real location/scene name only. If a CONTEXT line above gives a current location/scene and nothing in the passage contradicts it, use that. Never invent a vague positional phrase (e.g. "on the shelf", "near the door") — use null instead if no real name applies.
 
+NAMING: use the item's plain name without articles or commentary ("Staff of the Hulk", not "the Staff of the Hulk (an old relic)").
+
 Output ONLY valid JSON array (empty array if none found):
 [
   {

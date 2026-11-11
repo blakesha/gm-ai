@@ -62,6 +62,11 @@ services:
       - LLM_ENDPOINT=http://llm:11434/api/chat
       - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5:14b}
       - OLLAMA_NUM_CTX=${OLLAMA_NUM_CTX:-16384}
+      # Optional GM-voice model; leave empty to answer with OLLAMA_MODEL only
+      - NARRATION_MODEL=${NARRATION_MODEL:-}
+      - NARRATION_TEMPERATURE=${NARRATION_TEMPERATURE:-0.7}
+      - NARRATION_NUM_CTX=${NARRATION_NUM_CTX:-4096}
+      - NARRATION_MODE=${NARRATION_MODE:-auto}
       - LIBRARY_DIR=/library
       - JOBS_DB=/data/jobs.db
     depends_on:

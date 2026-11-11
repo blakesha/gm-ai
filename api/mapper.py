@@ -6,7 +6,7 @@ their job is to find and label content, not remember how it's stored.
 """
 import re
 
-from kg import escape_literal
+from kg import escape_literal, strip_commentary
 
 # Fields the Pass 2d stat-block prompt (and the stat_parser regex fast path)
 # both use, mapped onto the ontology's StatBlock properties.
@@ -92,7 +92,10 @@ _NULLISH = {"", "null", "none", "n/a", "na", "unknown", "nil", "-", "undefined"}
 def _clean_hint(value):
     """Models sometimes emit the string "null"/"none" instead of JSON null."""
     v = (str(value).strip() if value is not None else "")
-    return None if v.lower() in _NULLISH else v
+    # also "null (not stated in this passage)" - a nullish word plus commentary
+    if v.lower() in _NULLISH or re.match(r"^(null|none|n/a|unknown|nil)\b", v, re.IGNORECASE):
+        return None
+    return strip_commentary(v)
 
 
 ACTOR_KINDS = {"npc", "creature", "group", "deity"}
@@ -101,12 +104,49 @@ ITEM_TYPES = {"magic_item", "treasure", "weapon", "armor", "tool", "container", 
 GENERIC_EXIT_TARGETS = {"north", "south", "east", "west", "up", "down", "above", "below", "corridor", "passage",
                         "hall", "hallway", "door", "stairs", "stair", "room", "area", "tunnel", "exit", "outside"}
 
-LOCATION_TYPES = {"World", "Region", "Location", "Room"}
+LOCATION_TYPES = {"World", "Region", "Settlement", "Structure", "Landmark", "Room"}
+# Lookup order when a bare place name (a hint) must resolve to an existing
+# node: prefer the specific types over the generic fallback.
+PLACE_LOOKUP_ORDER = ["Structure", "Settlement", "Region", "Room", "World", "Landmark"]
+
+
+def place_uri(kg, name, triples, rdf_type: str = "Landmark") -> str:
+    """Resolve a place name against ALL place types, so a hint like "Castle
+    Grimstead" reuses the existing Structure instead of minting a duplicate
+    plain Landmark. Falls back to creating `rdf_type`."""
+    existing = kg.get_existing_place_uri(str(name).strip(), PLACE_LOOKUP_ORDER)
+    if existing:
+        if hasattr(kg, "touched"):
+            kg.touched.add(existing)
+        return existing
+    return kg.get_or_create_uri(name, rdf_type, triples)
+WORLD_NAMES = {"abeir-toril", "toril"}
+
+# Collectives like "gangs" or "half-orcs" are not factions.
+GENERIC_GROUP = re.compile(
+    r"^(the\s+)?(members|citizens|followers|servants|worshipers|worshippers|priests|"
+    r"soldiers|guards|patrols?|various|several|local|other|many|some)\b|"
+    r"\b(gangs?|groups?|patrols|bands|folk|people|adventurers|creatures|"
+    r"humans|elves|dwarves|gnomes|halflings|orcs|half-orcs|half-elves|goblins|kobolds|"
+    r"giants|trolls|ogres)$",
+    re.IGNORECASE,
+)
+
+
+def is_generic_group(name: str) -> bool:
+    return not re.search(r"[A-Z]", name) or bool(GENERIC_GROUP.search(name.strip()))
 
 
 def _location_type(location: dict) -> str:
-    location_type = location.get("location_type") or "Location"
-    return location_type if location_type in LOCATION_TYPES else "Location"
+    location_type = location.get("location_type") or "Landmark"
+    if location_type == "Location":  # legacy label from older prompts
+        location_type = "Landmark"
+    if location_type not in LOCATION_TYPES:
+        return "Landmark"
+    # The extractor over-tags World; only a real world name may be one.
+    if location_type == "World" and (location.get("location_name") or "").lower() not in WORLD_NAMES:
+        return "Region"
+    return location_type
 
 
 def map_locations(locations: list, kg, triples: list) -> None:
@@ -115,7 +155,7 @@ def map_locations(locations: list, kg, triples: list) -> None:
         name = location.get("location_name")
         if not name:
             continue
-        location_uri = kg.get_or_create_uri(name, _location_type(location), triples)
+        location_uri = place_uri(kg, name, triples, _location_type(location))
 
         if location.get("physical_appearance"):
             _add_descriptive(kg, seen, location_uri, "physicalAppearance", location["physical_appearance"], triples)
@@ -124,13 +164,13 @@ def map_locations(locations: list, kg, triples: list) -> None:
         if location.get("lore_context"):
             _add_descriptive(kg, seen, location_uri, "loreContext", location["lore_context"], triples)
         if location.get("parent_location_hint"):
-            parent_uri = kg.get_or_create_uri(location["parent_location_hint"], "Location", triples)
+            parent_uri = place_uri(kg, location["parent_location_hint"], triples)
             triples.append(f"{location_uri} rpg:locatedIn {parent_uri} .")
         for exit_ in location.get("exits") or []:
             target = _clean_hint(exit_.get("leads_to")) or ""
             if not target or target.lower() in GENERIC_EXIT_TARGETS or target.lower() == name.strip().lower():
                 continue
-            target_uri = kg.get_or_create_uri(target, "Location", triples)
+            target_uri = place_uri(kg, target, triples)
             triples.append(f"{location_uri} rpg:connectsTo {target_uri} .")
 
 
@@ -188,7 +228,7 @@ def map_readaloud(entries: list, kg, triples: list) -> None:
             # No Scene exists to hang this off (e.g. a location-only sourcebook
             # with no discrete encounters) - fall back to linking the text
             # straight to its Location rather than leaving it an orphan node.
-            location_uri = kg.get_or_create_uri(entry["located_in_hint"], "Location", triples)
+            location_uri = place_uri(kg, entry["located_in_hint"], triples)
             triples.append(f"{text_uri} rpg:locatedIn {location_uri} .")
 
 
@@ -232,7 +272,7 @@ def map_triggers(entries: list, kg, triples: list) -> None:
         elif entry.get("located_in_hint"):
             # Same fallback as map_readaloud - no Scene to attach to, so link
             # the Trigger straight to its Location instead of orphaning it.
-            location_uri = kg.get_or_create_uri(entry["located_in_hint"], "Location", triples)
+            location_uri = place_uri(kg, entry["located_in_hint"], triples)
             triples.append(f"{trigger_uri} rpg:locatedIn {location_uri} .")
 
 
@@ -276,7 +316,7 @@ def map_lore(entries: list, kg, triples: list) -> None:
             target_uri = kg.get_or_create_uri(entry["depends_on_event"], "HistoricalEvent", triples)
             triples.append(f"{event_uri} rpg:dependsOn {target_uri} .")
         if entry.get("related_location"):
-            location_uri = kg.get_or_create_uri(entry["related_location"], "Location", triples)
+            location_uri = place_uri(kg, entry["related_location"], triples)
             triples.append(f"{event_uri} rpg:occurredAt {location_uri} .")
         for actor_name in entry.get("related_actors") or []:
             actor_uri = kg.get_or_create_uri(actor_name, "Actor", triples)
@@ -289,11 +329,13 @@ def map_lore(entries: list, kg, triples: list) -> None:
 def map_actors(entries: list, kg, triples: list) -> None:
     seen = set()
     for entry in entries:
-        name = entry.get("actor_name")
+        name = _clean_hint(entry.get("actor_name"))
         if not name:
             continue
         actor_uri = kg.get_or_create_uri(name, "Actor", triples)
         kind = entry.get("actor_kind")
+        if kind == "group" and is_generic_group(name):
+            kind = "creature"
         if kind in ACTOR_KINDS and ("kind", actor_uri) not in seen:
             seen.add(("kind", actor_uri))
             if not kg.has_property(actor_uri, "actorKind"):
@@ -311,8 +353,11 @@ def map_actors(entries: list, kg, triples: list) -> None:
         if entry.get("lore_context"):
             _add_descriptive(kg, seen, actor_uri, "loreContext", entry["lore_context"], triples)
         if entry.get("located_in_hint"):
-            location_uri = kg.get_or_create_uri(entry["located_in_hint"], "Location", triples)
-            triples.append(f"{actor_uri} rpg:locatedIn {location_uri} .")
+            location_uri = place_uri(kg, entry["located_in_hint"], triples)
+            # A god is not "located" anywhere; a place hint on a deity means
+            # worship/following there (and is often just leaked context).
+            predicate = "worshippedIn" if kind == "deity" else "locatedIn"
+            triples.append(f"{actor_uri} rpg:{predicate} {location_uri} .")
         if entry.get("scene_context"):
             scene_uri = kg.get_or_create_uri(entry["scene_context"], "Scene", triples)
             triples.append(f"{scene_uri} rpg:spawns {actor_uri} .")
@@ -340,7 +385,7 @@ def map_items(entries: list, kg, triples: list) -> None:
             # rpg:locatedIn documents Actor as its domain, but RDFS domain/range
             # here is documentation, not an enforced constraint - reusing it for
             # Item avoids a near-duplicate predicate for the same relationship.
-            location_uri = kg.get_or_create_uri(entry["located_in_hint"], "Location", triples)
+            location_uri = place_uri(kg, entry["located_in_hint"], triples)
             triples.append(f"{item_uri} rpg:locatedIn {location_uri} .")
         if entry.get("owner_actor_hint"):
             owner_uri = kg.get_or_create_uri(entry["owner_actor_hint"], "Actor", triples)
@@ -364,7 +409,7 @@ def map_session_events(entries: list, kg, triples: list) -> None:
         if entry.get("is_resolved") is not None:
             triples.append(_bool_triple(event_uri, "isResolved", bool(entry["is_resolved"])))
         if entry.get("location_name"):
-            location_uri = kg.get_or_create_uri(entry["location_name"], "Location", triples)
+            location_uri = place_uri(kg, entry["location_name"], triples)
             triples.append(f"{event_uri} rpg:occurredAt {location_uri} .")
         if entry.get("caused_event"):
             target_uri = kg.get_or_create_uri(entry["caused_event"], "SessionEvent", triples)
@@ -396,7 +441,7 @@ def map_plot_hooks(entries: list, kg, triples: list) -> None:
             actor_uri = kg.get_or_create_uri(entry["involves_actor_hint"], "Actor", triples)
             triples.append(f"{hook_uri} rpg:involvesActor {actor_uri} .")
         if entry.get("involves_location_hint"):
-            location_uri = kg.get_or_create_uri(entry["involves_location_hint"], "Location", triples)
+            location_uri = place_uri(kg, entry["involves_location_hint"], triples)
             triples.append(f"{hook_uri} rpg:involvesLocation {location_uri} .")
         if entry.get("involves_item_hint"):
             item_uri = kg.get_or_create_uri(entry["involves_item_hint"], "Item", triples)

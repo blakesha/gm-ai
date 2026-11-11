@@ -12,10 +12,29 @@ rpg:Organization rdfs:subClassOf rpg:Actor .
 rpg:Deity rdfs:subClassOf rpg:Actor .
 # A book/adventure an entity was extracted from.
 rpg:SourceDocument a rdfs:Class .
+# An adventure being written with the author agent. Its entities live in a
+# separate named graph (urn:rpg:adventure:<slug>), flagged non-canon, and are
+# sourced to this node via rpg:foundIn.
+rpg:Adventure rdfs:subClassOf rpg:SourceDocument .
+rpg:isCanon a rdf:Property ; rdfs:range xsd:boolean .
 rpg:Item a rdfs:Class .
 rpg:Location a rdfs:Class .
 rpg:World rdfs:subClassOf rpg:Location .
+# Place hierarchy, largest to smallest:
+#   World > Region > Settlement (village/town/city) > Structure (castle, tower,
+#   inn, shop, temple, farm, any single building or compound) > Room (a keyed
+#   area/chamber inside a structure or dungeon).
+# A Landmark is a named place that fits none of these (a road, ford, hill,
+# grove). rpg:Location itself is the abstract parent and is never used as an
+# entity's own type. Entities carry ONE place type and the triplestore does no
+# inference, so to find "every place" walk the class hierarchy with a property
+# path:   ?place a/rdfs:subClassOf* rpg:Location .
+# (add `PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>`). Narrow with e.g.
+#   ?place a/rdfs:subClassOf* rpg:Structure .
+rpg:Landmark rdfs:subClassOf rpg:Location .
 rpg:Region rdfs:subClassOf rpg:Location .
+rpg:Settlement rdfs:subClassOf rpg:Location .
+rpg:Structure rdfs:subClassOf rpg:Location .
 rpg:Room rdfs:subClassOf rpg:Location .
 rpg:Event a rdfs:Class .
 rpg:HistoricalEvent rdfs:subClassOf rpg:Event .
@@ -55,7 +74,11 @@ rpg:savingThrow a rdf:Property ; rdfs:domain rpg:StatBlock ; rdfs:range xsd:stri
 rpg:quality a rdf:Property ; rdfs:domain rpg:StatBlock ; rdfs:range xsd:string .
 rpg:defenseRating a rdf:Property ; rdfs:domain rpg:StatBlock ; rdfs:range xsd:string .
 
-rpg:locatedIn a rdf:Property, owl:TransitiveProperty ; rdfs:domain rpg:Actor ; rdfs:range rpg:Location .
+# Anything with a position (Actor, Item, place, text) can be located in a place.
+# Where a Deity has worshippers, shrines or a following. Deities are not
+# "located" in a place, so use this instead of locatedIn for them.
+rpg:worshippedIn a rdf:Property ; rdfs:domain rpg:Deity ; rdfs:range rpg:Location .
+rpg:locatedIn a rdf:Property, owl:TransitiveProperty ; rdfs:range rpg:Location .
 rpg:occurredAt a rdf:Property ; rdfs:domain rpg:Event ; rdfs:range rpg:Location .
 rpg:participatedIn a rdf:Property ; rdfs:domain rpg:Actor ; rdfs:range rpg:Event .
 rpg:usesStatBlock a rdf:Property ; rdfs:domain rpg:Actor ; rdfs:range rpg:StatBlock .

@@ -14,8 +14,11 @@ import doctypes
 import jobs
 import mapper
 import context
+import adventure_graph
 import author
 import ingest_window
+import hooks
+import session_memory
 import sessions
 import stat_parser
 from kg import KnowledgeGraphManager, PREFIX
@@ -52,6 +55,8 @@ EXTRACTION_DIR = PROMPTS_DIR / "extraction"
 app = FastAPI(title="AI Game Master API")
 app.include_router(author.router)
 app.include_router(sessions.router)
+app.include_router(session_memory.session_router)
+app.include_router(session_memory.adventure_router)
 kg_manager = KnowledgeGraphManager()
 
 
@@ -72,12 +77,14 @@ def _load_schema(name: str) -> dict:
         return json.load(f)
 
 
-def get_agent_system_prompt(game_system: str) -> str:
+def get_agent_system_prompt(game_system: str, session_graph: str = "") -> str:
     with open(PROMPTS_DIR / "agent_prompt.md", "r") as f:
         template = f.read()
     with open(PROMPTS_DIR / "ontology.ttl", "r") as f:
         ontology = f.read()
-    return template.replace("{{GAME_SYSTEM}}", game_system).replace("{{ONTOLOGY}}", ontology)
+    graph = session_graph or "(none - no session is active, so nothing can be recorded)"
+    return (template.replace("{{GAME_SYSTEM}}", game_system).replace("{{ONTOLOGY}}", ontology)
+            .replace("{{SESSION_GRAPH}}", graph))
 
 
 def _context_note(location_hint: Optional[str], scene_hint: Optional[str],
@@ -581,16 +588,102 @@ AGENT_TOOLS = [
             }
         }
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "open_plot_hooks",
+            "description": ("List plot hooks that are still open in THIS session (not yet resolved here). "
+                            "Hooks are reusable across sessions; use this instead of querying PlotHook yourself."),
+            "parameters": {"type": "object", "properties": {"limit": {"type": "integer"}}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "resolve_plot_hook",
+            "description": ("Mark a plot hook as played out in THIS session only. Call it once a hook has been "
+                            "introduced and resolved. Never write rpg:isResolved on a hook."),
+            "parameters": {
+                "type": "object",
+                "properties": {"hook_uri": {"type": "string", "description": "uri from open_plot_hooks"},
+                               "outcome": {"type": "string", "description": "One sentence on how it played out."}},
+                "required": ["hook_uri"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "record_event",
+            "description": ("Log something significant that happened in play (a fight, a discovery, a promise, a death) "
+                            "in this session's memory. The player's own actions are logged automatically; use this for outcomes."),
+            "parameters": {"type": "object", "properties": {
+                "name": {"type": "string", "description": "Short title of the event."},
+                "description": {"type": "string"}, "outcome": {"type": "string"},
+                "location": {"type": "string", "description": "Name of the place it happened."},
+                "actors": {"type": "array", "items": {"type": "string"}, "description": "Names of those involved."}},
+                "required": ["name"]},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_state",
+            "description": ("Change the world in THIS session only (canon is never modified): e.g. status 'dead', "
+                            "locatedIn another place, owns an item. Use uris from search_entities."),
+            "parameters": {"type": "object", "properties": {
+                "entity_uri": {"type": "string"}, "predicate": {"type": "string", "description": "An ontology property, e.g. status, locatedIn, owns."},
+                "value": {"type": "string", "description": "A literal, or the uri of another entity."}},
+                "required": ["entity_uri", "predicate", "value"]},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "entity_state",
+            "description": "Current facts about one entity: canon plus this session's changes (session wins). Use before narrating state that may have changed.",
+            "parameters": {"type": "object", "properties": {"uri": {"type": "string"}}, "required": ["uri"]},
+        },
+    },
+]
+
+AGENT_TOOLS += [
+    json.loads(json.dumps(t).replace("THIS adventure's graph memory", "this session's memory")
+               .replace("THIS adventure", "this session").replace("adventure", "session"))
+    for t in author.AUTHOR_TOOLS if t["function"]["name"] in adventure_graph.RECORDERS
 ]
 
 MAX_TOOL_ROUNDS = 5
 
 
-def _run_tool(name: str, arguments: dict) -> str:
+def _run_tool(name: str, arguments: dict, session_id: Optional[str] = None) -> str:
+    if name == "open_plot_hooks":
+        try:
+            return json.dumps(hooks.open_hooks(kg_manager, session_id, int(arguments.get("limit") or 10)))
+        except Exception as e:
+            return f"Hook Error: {str(e)}"
+    if name == "resolve_plot_hook":
+        try:
+            return hooks.resolve_hook(kg_manager, session_id, arguments["hook_uri"], arguments.get("outcome", ""))
+        except Exception as e:
+            return f"Hook Error: {str(e)}"
+    if name in ("record_event", "set_state", "entity_state") or name in adventure_graph.RECORDERS:
+        if not session_id:
+            return "No session is active, so nothing can be recorded."
+        try:
+            skg = session_memory.SessionKG(kg_manager, session_id, sessions.title_of(session_id))
+            if name == "entity_state":
+                return session_memory.entity_state(skg, arguments.get("uri", ""))
+            fn = {"record_event": session_memory.record_event, "set_state": session_memory.set_state}.get(name) \
+                or adventure_graph.RECORDERS[name]
+            return fn(skg, arguments)
+        except Exception as e:
+            return f"Memory Error: {str(e)[:500]}"
     if name == "search_entities":
         try:
             results = kg_manager.search_entities(
-                arguments["query"], arguments.get("rdf_type"), arguments.get("limit", 10)
+                arguments["query"], arguments.get("rdf_type"), arguments.get("limit", 10),
+                graph=hooks.session_graph(session_id) if session_id else None
             )
             return json.dumps(results)
         except Exception as e:
@@ -602,7 +695,11 @@ def _run_tool(name: str, arguments: dict) -> str:
             query = f"{PREFIX}\n{query}"
         # Ignore keywords that only appear inside string literals.
         bare = re.sub(r'"(?:[^"\\]|\\.)*"|\'(?:[^\'\\]|\\.)*\'', '""', query)
-        is_update = bool(re.search(r"\b(INSERT|DELETE)\b", bare, re.IGNORECASE))
+        is_update = bool(re.search(r"\b(INSERT|DELETE|CLEAR|DROP|LOAD|CREATE|MOVE|COPY|ADD)\b", bare, re.IGNORECASE))
+        if is_update:
+            return ("Rejected: SPARQL updates are not allowed during play, so canon stays untouched. Record changes with "
+                    "set_state, record_event, or the record_location/record_actor/record_item/record_plot_hook tools; "
+                    "they are saved to this session's memory.")
         try:
             return json.dumps(kg_manager.execute_sparql(query, is_update=is_update))
         except Exception as e:
@@ -681,6 +778,12 @@ def _wants_narration(request: "ChatRequest", last_user: str) -> bool:
 def _finish(message: dict, request: "ChatRequest", last_user: str) -> dict:
     result = _finish_core(message, request, last_user)
     sessions.record_turn(request.session_id, last_user, result)
+    if request.session_id:   # keep a log of the player's actions in the session's graph memory
+        try:
+            turn = sum(1 for m in sessions._read(request.session_id)["messages"] if m.get("role") == "user")
+            session_memory.log_action(request.session_id, last_user, turn)
+        except Exception as exc:
+            print(f"session memory: could not log turn: {exc}")
     return result
 
 
@@ -705,9 +808,10 @@ def _finish_core(message: dict, request: "ChatRequest", last_user: str) -> dict:
 
 @app.post("/chat")
 def agent_chat(request: ChatRequest):
-    system_prompt = get_agent_system_prompt(request.game_system)
+    session_graph = hooks.session_graph(request.session_id) if request.session_id else ""
+    system_prompt = get_agent_system_prompt(request.game_system, session_graph)
     last_user = next((m["content"] for m in reversed(request.messages) if m.get("role") == "user"), "")
-    graph_context = context.retrieve_context(kg_manager, last_user)
+    graph_context = context.retrieve_context(kg_manager, last_user, graph=session_graph or None)
     if graph_context:
         system_prompt += "\n\n" + graph_context
     recent = [m for m in request.messages if m.get("role") in ("user", "assistant")][-GM_HISTORY_MESSAGES:]
@@ -726,7 +830,7 @@ def agent_chat(request: ChatRequest):
 
         messages.append(message)
         for tool in tool_calls:
-            tool_response = _run_tool(tool["function"]["name"], tool["function"]["arguments"])
+            tool_response = _run_tool(tool["function"]["name"], tool["function"]["arguments"], request.session_id)
             messages.append({"role": "tool", "content": tool_response, "name": tool["function"]["name"]})
 
     # Ran out of tool-call rounds - ask once more without tools so the model

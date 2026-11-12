@@ -151,6 +151,12 @@ A small local model is unreliable at deciding what to look up, so the agent is b
   in a Game Master voice. In `auto` mode only generative turns (actions, scene description) are narrated; factual
   lookups skip it. The grounded text is returned alongside as `grounded`.
 
+## Session memory and canon (`/sessions/{id}/memory`, page "World Memory & Canon")
+
+Canon is read-only during play. Each chat session has its own non-canon graph (`urn:rpg:session:<id>`) holding new entities the GM invents, world-state changes to existing entities (overlay triples: the session value wins over canon when read), a log of player actions and events, and per-session plot-hook resolutions. Reopening a session returns to that world state; deleting it clears the graph.
+
+The GM writes through tools (`set_state`, `record_event`, `record_location/actor/item/plot_hook`) and reads with `entity_state`; raw SPARQL updates are rejected. On the **World Memory & Canon** page the player can review a session's (or an adventure's) memory and mark entities or state changes as canon, which copies them into the shared graph, or discard / revert them.
+
 ## Adventure Writer (`/author/*`, page "Adventure Writer")
 
 A co-author for building your own adventure:
@@ -227,7 +233,7 @@ api/                  FastAPI app
   cleanup_graph.py, resolve_duplicates.py, init_graph.py
   prompts/            agent, narration and author prompts, ontology, extraction prompts + schemas
   eval/               extraction evaluation harness
-ui/                   Streamlit app (app.py = GM chat; pages/ = Adventure Writer, Library & Ingestion)
+ui/                   Streamlit app (app.py = page router; gm_chat.py = GM chat; pages/ = World Memory & Canon, Adventure Writer, Library & Ingestion)
 scripts/              kg-query.sh and example SPARQL
 postman/              API test collection
 tailscale/            serve config for the sidecar

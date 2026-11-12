@@ -6,7 +6,6 @@ import streamlit as st
 
 from common import API_URL, api
 
-st.set_page_config(page_title="Library & Ingestion", layout="wide")
 st.title("📚 Library & Ingestion")
 st.caption("Add books to the knowledge graph. Chunking, structure detection, classification and extraction all "
            "happen server-side in the background, so you can close this page.")

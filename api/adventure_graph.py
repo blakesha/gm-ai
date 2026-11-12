@@ -21,7 +21,7 @@ import re
 from typing import Dict, List, Optional
 
 import mapper
-from kg import (KnowledgeGraphManager, PREFIX, PLACE_TYPES, canonical_key, escape_literal)
+from kg import (KnowledgeGraphManager, PREFIX, PLACE_TYPES, SUPERTYPES, canonical_key, escape_literal)
 
 GRAPH_BASE = "urn:rpg:adventure:"
 PLACE_FAMILY = ["Structure", "Settlement", "Region", "Room", "World", "Landmark"]
@@ -140,7 +140,7 @@ class AdventureKG:
                 return canon
         safe_type = self.base.sanitize_qname(rdf_type, "t_")
         uri = f"rpg:{uri_prefix(self.slug)}{safe_type}_{self.base.sanitize_qname(name, 'e_')}"
-        triples += [f"{uri} a rpg:{safe_type} .", f'{uri} rpg:name "{escape_literal(name)}" .',
+        triples += [f"{uri} a rpg:{safe_type} .", *([f"{uri} a rpg:{SUPERTYPES[safe_type]} ."] if safe_type in SUPERTYPES else []), f'{uri} rpg:name "{escape_literal(name)}" .',
                     f"{uri} rpg:isCanon false .", f"{uri} rpg:foundIn {adventure_uri(self.slug)} ."]
         self.pending.append((uri, safe_type, name))
         self.created.append((name, safe_type))

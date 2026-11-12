@@ -26,11 +26,10 @@ rpg:World rdfs:subClassOf rpg:Location .
 #   area/chamber inside a structure or dungeon).
 # A Landmark is a named place that fits none of these (a road, ford, hill,
 # grove). rpg:Location itself is the abstract parent and is never used as an
-# entity's own type. Entities carry ONE place type and the triplestore does no
-# inference, so to find "every place" walk the class hierarchy with a property
-# path:   ?place a/rdfs:subClassOf* rpg:Location .
-# (add `PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>`). Narrow with e.g.
-#   ?place a/rdfs:subClassOf* rpg:Structure .
+# entity's own type. The triplestore does no inference, so ingestion asserts
+# the parent type explicitly: every place has its specific type AND rpg:Location.
+# Find "every place" with   ?place a rpg:Location .   Narrow with e.g.
+#   ?place a rpg:Structure .
 rpg:Landmark rdfs:subClassOf rpg:Location .
 rpg:Region rdfs:subClassOf rpg:Location .
 rpg:Settlement rdfs:subClassOf rpg:Location .
@@ -52,6 +51,12 @@ rpg:PlotHook a rdfs:Class .
 
 rpg:name a rdf:Property ; rdfs:range xsd:string .
 rpg:isPlayerFacing a rdf:Property ; rdfs:range xsd:boolean .
+# A hook is never resolved globally. A HookResolution lives in a chat session's
+# own graph (urn:rpg:session:<id>) and marks the hook resolved for that session only.
+rpg:HookResolution a rdfs:Class .
+rpg:resolvesHook a rdf:Property ; rdfs:domain rpg:HookResolution ; rdfs:range rpg:PlotHook .
+rpg:inSession a rdf:Property ; rdfs:domain rpg:HookResolution ; rdfs:range xsd:string .
+rpg:resolvedAt a rdf:Property ; rdfs:domain rpg:HookResolution ; rdfs:range xsd:integer .
 rpg:isResolved a rdf:Property ; rdfs:range xsd:boolean .
 rpg:status a rdf:Property ; rdfs:range xsd:string .
 rpg:outcome a rdf:Property ; rdfs:range xsd:string .
@@ -105,11 +110,15 @@ rpg:actorKind a rdf:Property ; rdfs:domain rpg:Actor ; rdfs:range xsd:string .
 rpg:memberOf a rdf:Property ; rdfs:domain rpg:Actor ; rdfs:range rpg:Actor .
 # Item kind: magic_item | treasure | weapon | armor | tool | container | document | consumable | other.
 rpg:itemType a rdf:Property ; rdfs:domain rpg:Item ; rdfs:range xsd:string .
-# Two Locations joined by a door, stair, passage etc. Stored once, in one direction only;
-# the store does no inference, so query it as (rpg:connectsTo|^rpg:connectsTo).
+# Two Locations joined by a door, stair, passage etc. Stored in both directions
+# (the store does no inference, so ingestion writes the reverse edge too).
 rpg:connectsTo a rdf:Property, owl:SymmetricProperty ; rdfs:domain rpg:Location ; rdfs:range rpg:Location .
 # Provenance: where in which book an entity was found. May have several values
 # (an entity is usually mentioned in more than one place).
 rpg:foundIn a rdf:Property ; rdfs:range rpg:SourceDocument .
 rpg:foundOnPage a rdf:Property ; rdfs:range xsd:integer .
 rpg:foundInSection a rdf:Property ; rdfs:range xsd:string .
+# Session / adventure memory bookkeeping (see session_memory.py).
+rpg:recordedAt a rdf:Property ; rdfs:range xsd:integer .
+rpg:sequence a rdf:Property ; rdfs:range xsd:integer .
+rpg:promotedFromSession a rdf:Property ; rdfs:range xsd:string .

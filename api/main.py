@@ -15,6 +15,8 @@ import jobs
 import mapper
 import context
 import author
+import ingest_window
+import sessions
 import stat_parser
 from kg import KnowledgeGraphManager, PREFIX
 
@@ -35,6 +37,7 @@ NARRATION_TEMPERATURE = float(os.getenv("NARRATION_TEMPERATURE", "0.7"))
 NARRATION_MODE = os.getenv("NARRATION_MODE", "auto").strip().lower()
 NARRATION_NUM_CTX = int(os.getenv("NARRATION_NUM_CTX", "4096"))  # short prompt; small ctx keeps VRAM free
 NARRATION_HISTORY_TURNS = 4
+GM_HISTORY_MESSAGES = 16   # recent turns sent to the model; the full transcript is kept in the chat session
 EXTRACT_FILTER = os.getenv("EXTRACT_FILTER", "grounding")     # none | grounding | llm | both (llm verifier hurt in evals)
 FILTER_MODEL = os.getenv("OLLAMA_FILTER_MODEL") or None        # defaults to the extraction model
 GLEAN = {x for x in os.getenv("EXTRACT_GLEAN", "").split(",") if x}   # follow-up pass; off by default (no gain once actor_kind/type hints were added)
@@ -48,6 +51,7 @@ EXTRACTION_DIR = PROMPTS_DIR / "extraction"
 
 app = FastAPI(title="AI Game Master API")
 app.include_router(author.router)
+app.include_router(sessions.router)
 kg_manager = KnowledgeGraphManager()
 
 
@@ -380,6 +384,8 @@ async def ingest_pdf(
 # Library browsing + background ingestion
 # ---------------------------------------------------------------------------
 job_store = jobs.JobStore(JOBS_DB)
+window = ingest_window.IngestWindow(job_store)
+app.include_router(ingest_window.make_router(window))
 
 
 def _resolve_library_path(rel: str) -> Path:
@@ -416,6 +422,11 @@ def process_job(job: dict, store: jobs.JobStore) -> None:
             continue
         if store.get(job["id"])["status"] == "cancelled":
             return
+        if not window.is_open():
+            # Window closed: park the job. Its checkpoint (chunks_done + hints) is already saved,
+            # so it resumes from this chunk when the window reopens.
+            store.update(job["id"], status="queued", last_error=None)
+            return
         try:
             extracted = process_chunk(
                 chunk["text"], doc_type, job["game_system"], current_location, current_scene,
@@ -438,7 +449,7 @@ def process_job(job: dict, store: jobs.JobStore) -> None:
 
 @app.on_event("startup")
 def _start_worker():
-    jobs.Worker(job_store, process_job).start()
+    jobs.Worker(job_store, process_job, gate=window.is_open).start()
 
 
 @app.get("/document_types")
@@ -531,6 +542,7 @@ def cancel_all():
 class ChatRequest(BaseModel):
     messages: List[Dict[str, str]]
     game_system: str
+    session_id: Optional[str] = None  # when set, the exchange is recorded in that chat session
     narrate: Optional[bool] = None  # None = auto (narrate scenes, skip factual lookups)
 
 
@@ -667,6 +679,12 @@ def _wants_narration(request: "ChatRequest", last_user: str) -> bool:
 
 
 def _finish(message: dict, request: "ChatRequest", last_user: str) -> dict:
+    result = _finish_core(message, request, last_user)
+    sessions.record_turn(request.session_id, last_user, result)
+    return result
+
+
+def _finish_core(message: dict, request: "ChatRequest", last_user: str) -> dict:
     """Return the chat reply, narrated if a narration model is configured."""
     grounded = (message.get("content") or "").strip()
     if not NARRATION_MODEL or not grounded:
@@ -692,7 +710,10 @@ def agent_chat(request: ChatRequest):
     graph_context = context.retrieve_context(kg_manager, last_user)
     if graph_context:
         system_prompt += "\n\n" + graph_context
-    messages = [{"role": "system", "content": system_prompt}] + request.messages
+    recent = [m for m in request.messages if m.get("role") in ("user", "assistant")][-GM_HISTORY_MESSAGES:]
+    while recent and recent[0].get("role") != "user":
+        recent = recent[1:]
+    messages = [{"role": "system", "content": system_prompt}] + recent
 
     for _ in range(MAX_TOOL_ROUNDS):
         payload = {"model": OLLAMA_MODEL, "messages": messages, "tools": AGENT_TOOLS, "stream": False,

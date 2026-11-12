@@ -32,7 +32,7 @@ It was developed against AD&D 2nd Edition material (Forgotten Realms) but the pi
 
 | Service | Container | Port | Purpose |
 |---|---|---|---|
-| `web-ui` | `gm_ui` | 8501 | Streamlit app: GM chat, ingestion, and the **Adventure Writer** page |
+| `web-ui` | `gm_ui` | 8501 | Streamlit app with three pages: **GM chat** (recorded sessions), **Adventure Writer**, and **Library & Ingestion** |
 | `agent-api` | `agent_api` | 8000 | FastAPI: ingestion pipeline, GM agent, adventure writer |
 | `triplestore` | `rpg_graph_db` | 127.0.0.1:7879 | Oxigraph SPARQL store (canon graph + one named graph per adventure) |
 | `llm` | `local_llm` | 127.0.0.1:11434 | Ollama (ROCm image; edit the compose file for NVIDIA/CPU) |
@@ -55,9 +55,9 @@ docker compose up -d            # or: podman compose up -d
 docker exec local_llm ollama pull qwen2.5:14b
 ```
 
-Open http://localhost:8501. In the sidebar, browse the library, choose a PDF (or a folder) and press
-**Process**. Ingestion runs in the background; the Jobs panel shows progress and you can close the page.
-Then ask the GM about what you ingested, or open **Adventure Writer** from the page list.
+Open http://localhost:8501. On the **Library & Ingestion** page, browse the library, choose a PDF (or a folder)
+and press **Process**. Ingestion runs in the background; the Jobs panel shows progress and you can close the page.
+Then ask the GM about what you ingested on the main page, or open **Adventure Writer** from the page list.
 
 > **Changing configuration** (anything in `.env` or `docker-compose.yml`): containers have to be recreated to pick
 > up new environment variables, and `agent-api` has dependents. With Podman, `podman rm -f --depend agent_api`
@@ -80,6 +80,19 @@ PDFs are processed server-side by a background job queue (`api/jobs.py`, SQLite 
 5. **Mapping** (`mapper.py`): deterministic conversion of the extracted JSON to RDF triples. No LLM involved. Names
    are resolved to existing entities (`kg.py`), including variants like "Shadowdale village" or "Lord Elminster",
    and provenance (source document, page, section) is attached to everything.
+
+### Ingestion schedule
+
+Ingestion keeps the GPU busy for hours, so it can be limited to a time window (for example overnight, so it doesn't
+compete with game sessions). Set it on the **Library & Ingestion** page under *Ingestion schedule*: the opening and
+closing times, the days the window opens (an overnight window belongs to the evening it opens), and an IANA
+timezone such as `Australia/Perth` (the containers run in UTC, so the timezone is explicit).
+
+- Outside the window no new job starts; queued jobs wait.
+- A job running when the window closes pauses at the next chunk and goes back to the queue with its checkpoint,
+  then resumes from that chunk when the window reopens (at most one chunk overruns).
+- The setting is stored in the jobs database and survives restarts. Manual single-chunk ingestion is never gated.
+- API: `GET/PUT /ingest/window`. `INGEST_TZ` sets the initial default timezone.
 
 ### Maintenance scripts (run inside the `agent_api` container)
 
@@ -123,7 +136,7 @@ The ingested books live in the default graph ("canon"). Each adventure you write
 `rpg:foundIn`. Canon queries (the GM agent, ingestion) never see it, so invented material can't be mistaken for
 setting lore, while one query can still join both with `GRAPH <urn:rpg:adventure:...> { ... }`.
 
-## GM agent (`POST /chat`)
+## GM agent (`POST /chat`) and recorded sessions
 
 A small local model is unreliable at deciding what to look up, so the agent is built to be grounded:
 
@@ -131,6 +144,9 @@ A small local model is unreliable at deciding what to look up, so the agent is b
   (descriptions, source page, containers, contents, events, members) are put in the prompt before the model runs.
 - **Strict grounding:** the prompt requires answers to come only from graph results and to say plainly when the
   graph has nothing. SPARQL tool errors are returned to the model with the query that failed.
+- **Recorded sessions:** each conversation is a session saved on the server (`/data/chats`). The GM page lets you
+  start a new session, reopen, rename, delete or download one as Markdown. The model sees the last 16 messages;
+  the full transcript is kept in the session. Narrated replies keep the pre-narration facts for inspection.
 - **Narration model (optional):** if `NARRATION_MODEL` is set, a second, creative model rewrites the grounded answer
   in a Game Master voice. In `auto` mode only generative turns (actions, scene description) are narrated; factual
   lookups skip it. The grounded text is returned alongside as `grounded`.
@@ -165,6 +181,8 @@ Set in `.env` (passed through `docker-compose.yml`).
 | `EXTRACT_FILTER` | `grounding` | `none`, `grounding`, `llm` or `both` |
 | `OLLAMA_NUM_PREDICT` | `3000` | Token cap per extraction call |
 | `ADVENTURES_DIR` | `/data/adventures` | Where adventure documents and chats are stored |
+| `CHAT_DIR` | `/data/chats` | Where recorded GM chat sessions are stored |
+| `INGEST_TZ` | `UTC` | Initial timezone for the ingestion window (editable in the UI) |
 
 Model notes: the repo's setup uses `qwen2.5:14b` for everything structured. For narration it is configured for a
 12B roleplay model (e.g. Wayfarer 12B Q4_K_M via `ollama pull hf.co/LatitudeGames/Wayfarer-12B-GGUF:Q4_K_M`). On a
@@ -185,7 +203,9 @@ Model notes: the repo's setup uses `qwen2.5:14b` for everything structured. For 
 | `POST /jobs`, `GET /jobs`, `POST /jobs/{id}/cancel`, `/retry`, `/cancel_all` | Background ingestion queue |
 | `POST /ingest`, `POST /ingest_pdf` | Ingest raw text / a single PDF directly |
 | `GET /document_types` | Available document types |
-| `POST /chat` | GM agent |
+| `GET/PUT /ingest/window` | Read / set the ingestion time window |
+| `POST /chat` | GM agent (send `session_id` to record the exchange) |
+| `GET/POST /sessions`, `GET/PUT/DELETE /sessions/{id}` | Recorded GM chat sessions |
 | `GET/POST /author/adventures`, `GET/PUT /author/adventures/{slug}` | List, create, read, save adventure documents |
 | `GET /author/adventures/{slug}/chat`, `/graph` | Saved conversation; what is recorded in its graph |
 | `POST /author/chat` | Adventure writing partner |
@@ -200,11 +220,14 @@ api/                  FastAPI app
   context.py          pre-fetch of graph records for the prompt
   kg.py               SPARQL client, entity search and name resolution
   mapper.py           extracted JSON -> RDF
-  chunker.py, doctypes.py, extract_filter.py, stat_parser.py, jobs.py
+  chunker.py, doctypes.py, extract_filter.py, stat_parser.py
+  jobs.py             persistent ingestion queue and worker
+  ingest_window.py    ingestion time window (pause/resume)
+  sessions.py         recorded GM chat sessions
   cleanup_graph.py, resolve_duplicates.py, init_graph.py
   prompts/            agent, narration and author prompts, ontology, extraction prompts + schemas
   eval/               extraction evaluation harness
-ui/                   Streamlit app (app.py = GM + ingestion; pages/ = Adventure Writer)
+ui/                   Streamlit app (app.py = GM chat; pages/ = Adventure Writer, Library & Ingestion)
 scripts/              kg-query.sh and example SPARQL
 postman/              API test collection
 tailscale/            serve config for the sidecar

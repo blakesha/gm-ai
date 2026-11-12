@@ -1,4 +1,4 @@
-"""Persistent background ingestion queue.
+"""Persistent background ingestion queue (see ingest_window.py for the optional time window).
 
 One job == one PDF. Jobs live in SQLite (on a volume) so they survive API
 restarts; a single worker thread drains the queue one job at a time (the
@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     updated REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS jobs_status ON jobs(status);
+CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 """
 
 
@@ -52,6 +53,16 @@ class JobStore:
         conn = sqlite3.connect(self._db_path, timeout=30)
         conn.row_factory = sqlite3.Row
         return conn
+
+    def get_setting(self, key: str, default: Optional[str] = None) -> Optional[str]:
+        with self._lock, self._conn() as c:
+            r = c.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+            return r["value"] if r else default
+
+    def set_setting(self, key: str, value: str) -> None:
+        with self._lock, self._conn() as c:
+            c.execute("INSERT INTO settings(key, value) VALUES(?, ?) "
+                      "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, value))
 
     def enqueue(self, path: str, document_type: str, game_system: str, force: bool = False) -> Optional[int]:
         """Queue a PDF. Skips it (returns None) if it's already queued/running,
@@ -124,12 +135,16 @@ class Worker(threading.Thread):
     """`process(job, store)` runs one job to completion, checkpointing via
     store.update and polling store.get(id)['status'] for cancellation."""
 
-    def __init__(self, store: JobStore, process: Callable[[dict, JobStore], None]):
+    def __init__(self, store: JobStore, process: Callable[[dict, JobStore], None],
+                 gate: Optional[Callable[[], bool]] = None):
         super().__init__(daemon=True, name="ingest-worker")
-        self.store, self.process = store, process
+        self.store, self.process, self.gate = store, process, gate
 
     def run(self):
         while True:
+            if self.gate is not None and not self.gate():  # outside the ingestion window: start nothing
+                time.sleep(15)
+                continue
             job = self.store.claim_next()
             if not job:
                 time.sleep(2)

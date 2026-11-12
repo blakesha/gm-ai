@@ -1,0 +1,10 @@
+{
+"TSR 9519 The Lost Le#21": {"locations": [], "actors": ["armored dwarves"], "items": [], "statblocks": [], "readaloud": 1, "triggers": 1},
+"TSR 9519 The Lost Le#35": {"locations": ["Dumathoin's Temple"], "actors": ["Dumathoin"], "items": [], "statblocks": [], "readaloud": 1, "triggers": 0},
+"TSR 9519 The Lost Le#54": {"locations": ["Room #7: Clan Museum"], "actors": ["ruby dwarf"], "items": ["brazier"], "statblocks": [], "readaloud": 0, "triggers": 2},
+"TSR 9519 The Lost Le#55": {"locations": ["Room #7: Clan Museum"], "actors": [], "items": [], "statblocks": [], "readaloud": 1, "triggers": 0},
+"TSR 9519 The Lost Le#78": {"locations": ["Room #11A: Sanctum Genericum"], "actors": ["Johanna"], "items": ["silver amulets", "golden symbols", "floor chest", "crystal ball"], "statblocks": [], "readaloud": 1, "triggers": 1},
+"TSR 9519 The Lost Le#94": {"locations": ["Room #12D: Warriors' Cairn"], "actors": ["Dumathoin", "Clangeddin"], "items": ["gong", "stone shelf", "magical weapon"], "statblocks": [], "readaloud": 1, "triggers": 1},
+"TSR 9519 The Lost Le#130": {"locations": ["Room #15D: The Hall of History"], "actors": [], "items": [], "statblocks": [], "readaloud": 1, "triggers": 0},
+"TSR 9519 The Lost Le#186": {"locations": ["Room #26: Hall of Mirrors"], "actors": ["Will o' Wisp"], "items": [], "statblocks": ["Will o' Wisp"], "readaloud": 0, "triggers": 3}
+}

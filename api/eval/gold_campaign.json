@@ -1,0 +1,10 @@
+{
+"TSR 1060 Ruins of Un#106": {"locations": ["Room #18: Lair of Webs"], "actors": ["ettercap", "spiders"], "items": ["ring of jumping", "table"], "statblocks": ["Spider, Large", "Ettercap"], "readaloud": 1, "triggers": 2},
+"TSR 1060 Ruins of Un#140": {"locations": ["Room #28: The Librarium"], "actors": [], "items": ["skull", "spectacles", "candelabra", "black dragonhide spell book", "gray elephant-hide spell book"], "statblocks": [], "readaloud": 0, "triggers": 1},
+"TSR 1060 Ruins of Un#202": {"locations": ["Room #44", "The Ghost Gate"], "actors": ["helmed horrors", "animate sword"], "items": ["string of forty pearls", "bloodstones", "citrines", "rubies", "star sapphires", "opals", "peridots"], "statblocks": ["Animate sword", "Helmed Horror"], "readaloud": 1, "triggers": 1},
+"TSR 1060 Ruins of Un#227": {"locations": ["Room #49D", "The Tomb"], "actors": ["skeletal stirges"], "items": [], "statblocks": ["Skeletal Stirge"], "readaloud": 0, "triggers": 1},
+"TSR 1060 Ruins of Un#254": {"locations": ["Room #54: Suul's Lair"], "actors": ["Suul", "Nester"], "items": ["driftlight", "open book"], "statblocks": [], "readaloud": 1, "triggers": 2},
+"TSR 1060 Ruins of Un#265": {"locations": ["Room #56: The Lair of Hungry Spiders"], "actors": ["hatchling giant spiders", "giant spiders"], "items": ["dagger +2", "wand of wonder", "ring of invisibility", "canvas sack"], "statblocks": ["Spider, Giant hatchlings", "Spider, Giant"], "readaloud": 0, "triggers": 2},
+"TSR 1060 Ruins of Un#377": {"locations": [], "actors": [], "items": ["arrow of holding", "arrowheads of marking"], "statblocks": [], "readaloud": 0, "triggers": 0},
+"TSR 1060 Ruins of Un#408": {"locations": [], "actors": ["Thingarlus", "Elminster"], "items": ["velvet crown", "wine of eternity"], "statblocks": [], "readaloud": 0, "triggers": 0}
+}

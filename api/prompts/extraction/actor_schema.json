@@ -3,13 +3,58 @@
   "items": {
     "type": "object",
     "properties": {
-      "actor_name": { "type": "string" },
-      "physical_appearance": { "type": ["string", "null"] },
-      "gm_description": { "type": ["string", "null"] },
-      "lore_context": { "type": ["string", "null"] },
-      "located_in_hint": { "type": ["string", "null"] },
-      "scene_context": { "type": ["string", "null"] }
+      "actor_name": {
+        "type": "string"
+      },
+      "physical_appearance": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "gm_description": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "lore_context": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "located_in_hint": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "scene_context": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "actor_kind": {
+        "type": "string",
+        "enum": [
+          "npc",
+          "creature",
+          "group",
+          "deity"
+        ]
+      },
+      "affiliation_hint": {
+        "type": [
+          "string",
+          "null"
+        ]
+      }
     },
-    "required": ["actor_name"]
+    "required": [
+      "actor_name",
+      "actor_kind"
+    ]
   }
 }

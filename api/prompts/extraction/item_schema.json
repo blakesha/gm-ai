@@ -3,14 +3,63 @@
   "items": {
     "type": "object",
     "properties": {
-      "item_name": { "type": "string" },
-      "physical_appearance": { "type": ["string", "null"] },
-      "gm_description": { "type": ["string", "null"] },
-      "lore_context": { "type": ["string", "null"] },
-      "located_in_hint": { "type": ["string", "null"] },
-      "owner_actor_hint": { "type": ["string", "null"] },
-      "scene_context": { "type": ["string", "null"] }
+      "item_name": {
+        "type": "string"
+      },
+      "physical_appearance": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "gm_description": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "lore_context": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "located_in_hint": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "owner_actor_hint": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "scene_context": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "item_type": {
+        "type": "string",
+        "enum": [
+          "magic_item",
+          "treasure",
+          "weapon",
+          "armor",
+          "tool",
+          "container",
+          "document",
+          "consumable",
+          "other"
+        ]
+      }
     },
-    "required": ["item_name"]
+    "required": [
+      "item_name",
+      "item_type"
+    ]
   }
 }

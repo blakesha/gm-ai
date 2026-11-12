@@ -1,11 +1,30 @@
 version: '3.8'
 
 services:
+  # Tailscale sidecar: joins the tailnet as "rpg-gm" and proxies HTTPS to the
+  # UI (443) and API (8443) over the compose network. Needs TS_AUTHKEY in .env.
+  tailscale:
+    image: docker.io/tailscale/tailscale:latest
+    container_name: rpg_tailscale
+    hostname: rpg-gm
+    environment:
+      - TS_AUTHKEY=${TS_AUTHKEY}
+      - TS_STATE_DIR=/var/lib/tailscale
+      - TS_SERVE_CONFIG=/config/serve.json
+      - TS_USERSPACE=true
+    volumes:
+      - tailscale_state:/var/lib/tailscale
+      - ./tailscale:/config:ro,z
+    depends_on:
+      - web-ui
+      - agent-api
+    restart: unless-stopped
+
   triplestore:
     image: docker.io/oxigraph/oxigraph:latest
     container_name: rpg_graph_db
     ports:
-      - "7879:7878"
+      - "127.0.0.1:7879:7878"
     volumes:
       - oxigraph_data:/data
     command: ["serve", "--location", "/data", "--bind", "0.0.0.0:7878"]
@@ -18,7 +37,7 @@ services:
       - ROCR_VISIBLE_DEVICE=0
       - HSA_NO_SCRATCH_RECLAIM=1
     ports:
-      - "11434:11434"
+      - "127.0.0.1:11434:11434"
     volumes:
       - ollama_data:/root/.ollama
     devices:
@@ -41,12 +60,22 @@ services:
       - SPARQL_QUERY=http://triplestore:7878/query
       - SPARQL_UPDATE=http://triplestore:7878/update
       - LLM_ENDPOINT=http://llm:11434/api/chat
-      - OLLAMA_MODEL=qwen2.5:14b
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5:14b}
+      - OLLAMA_NUM_CTX=${OLLAMA_NUM_CTX:-16384}
+      # Optional GM-voice model; leave empty to answer with OLLAMA_MODEL only
+      - NARRATION_MODEL=${NARRATION_MODEL:-}
+      - NARRATION_TEMPERATURE=${NARRATION_TEMPERATURE:-0.7}
+      - NARRATION_NUM_CTX=${NARRATION_NUM_CTX:-4096}
+      - NARRATION_MODE=${NARRATION_MODE:-auto}
+      - LIBRARY_DIR=/library
+      - JOBS_DB=/data/jobs.db
     depends_on:
       - triplestore
       - llm
     volumes:
       - ./api:/app:z
+      - ${LIBRARY_HOST_PATH:-/mnt/storage/share/RPG}:/library:z
+      - jobs_data:/data
 
   web-ui:
     build:
@@ -72,5 +101,7 @@ services:
     command: ["tail", "-f", "/dev/null"]
 
 volumes:
+  tailscale_state:
+  jobs_data:
   oxigraph_data:
   ollama_data:

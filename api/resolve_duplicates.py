@@ -29,10 +29,10 @@ import argparse
 import re
 from collections import namedtuple
 
-from kg import KnowledgeGraphManager, PREFIX
+from kg import KnowledgeGraphManager, PREFIX, canonical_key
 
 RDF_TYPE = "<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>"
-NAMED_ENTITY_TYPES = {"Actor", "Item", "Location", "GameSystem"}
+NAMED_ENTITY_TYPES = {"Actor", "Item", "Landmark", "GameSystem"}
 MIN_NAME_LEN = 4
 STOPWORD_PREFIX = re.compile(r"^(the|a|an)\s+", re.IGNORECASE)
 
@@ -126,13 +126,53 @@ def merge_entity(kg, survivor: str, duplicate: str) -> None:
     """, is_update=True)
 
 
+EXACT_TYPES = {"Actor", "Item", "Landmark", "Region", "Settlement", "Structure", "Organization", "Deity", "GameSystem"}
+# Place types that describe the same real-world thing; an exact-name match
+# across them is a duplicate, and the most specific type should survive.
+PLACE_FAMILY = ("Landmark", "Region", "Settlement", "Structure")
+PLACE_SPECIFICITY = {"Structure": 0, "Settlement": 1, "Region": 2, "Landmark": 3}
+
+
+def find_exact(kg, entities: list) -> list:
+    """Same type, identical name once case, punctuation and a leading
+    "the/a/an" are ignored. Safe to merge, unlike the containment tiers:
+    "Keep" vs "Zhentil Keep" never matches here. The survivor is whichever
+    node already has more edges."""
+    degree = {}
+    for b in kg.execute_sparql("SELECT ?e (COUNT(*) AS ?n) WHERE { ?e ?p ?o } GROUP BY ?e")["results"]["bindings"]:
+        degree[f"rpg:{b['e']['value'].split('#')[-1]}"] = int(b["n"]["value"])
+    groups = {}
+    for e in entities:
+        if e.type in EXACT_TYPES and len(canonical_key(e.name, e.type)) >= 3:
+            group_type = "Place" if e.type in PLACE_FAMILY else e.type
+            groups.setdefault((group_type, canonical_key(e.name, e.type)), {})[e.uri] = e
+    pairs = []
+    for members in groups.values():
+        if len(members) < 2:
+            continue
+        ranked = sorted(members.values(), key=lambda e: (PLACE_SPECIFICITY.get(e.type, 0), "(" in e.name, -degree.get(e.uri, 0), len(e.name), e.uri))
+        pairs.extend(Pair(survivor=ranked[0].uri, duplicate=d.uri, type=d.type) for d in ranked[1:])
+    return pairs
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--apply", action="store_true", help="Merge the AUTO tier for real.")
+    parser.add_argument("--exact", action="store_true",
+                        help="Only merge same-type names identical modulo case/punctuation/leading 'the' (safe).")
     args = parser.parse_args()
 
     kg = KnowledgeGraphManager()
     entities = fetch_entities(kg)
+    if args.exact:
+        uri_to_name = {e.uri: e.name for e in entities}
+        pairs = find_exact(kg, entities)
+        print(f"EXACT matches ({len(pairs)} pairs) - {'merging' if args.apply else 'dry run'}:")
+        for p in pairs:
+            print(f"  [{p.type}] {uri_to_name[p.duplicate]!r} -> {uri_to_name[p.survivor]!r}")
+            if args.apply:
+                merge_entity(kg, p.survivor, p.duplicate)
+        return
     auto, review = find_candidates(entities)
 
     uri_to_name = {e.uri: e.name for e in entities}

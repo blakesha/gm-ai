@@ -1,0 +1,10 @@
+{
+"TSR 9486 Volo's Guid#49": {"locations": ["Marsember", "Starwater Keep"], "actors": ["Ayesunder Truesilver", "Purple Dragons", "Imperial Navy", "Ildool"], "items": [], "statblocks": [], "readaloud": 0, "triggers": 0},
+"TSR 9486 Volo's Guid#70": {"locations": ["The Masked Merfolk", "Drowned Sailors Society"], "actors": ["doppelgangers", "King Azoun", "Tannuth"], "items": [], "statblocks": [], "readaloud": 0, "triggers": 0},
+"TSR 9486 Volo's Guid#76": {"locations": ["Harbor Bottom", "The Tankard of Eels"], "actors": [], "items": [], "statblocks": [], "readaloud": 0, "triggers": 0},
+"TSR 9486 Volo's Guid#110": {"locations": ["Dulbiir's", "The Lavender Lion", "Spiderweb Room", "Velvet Floor"], "actors": ["Urtos Dulbiir", "giant spider"], "items": [], "statblocks": [], "readaloud": 0, "triggers": 0},
+"TSR 9486 Volo's Guid#145": {"locations": ["Monksblade", "Mother Chauntea's House", "Lost Knights Dance"], "actors": ["Knights of Tempus and Tyche", "Otto"], "items": [], "statblocks": [], "readaloud": 0, "triggers": 0},
+"TSR 9486 Volo's Guid#236": {"locations": ["Immersea", "High Common"], "actors": ["Mother Lledew"], "items": [], "statblocks": [], "readaloud": 0, "triggers": 0},
+"TSR 9486 Volo's Guid#297": {"locations": ["The High Helm"], "actors": ["Purple Dragons"], "items": [], "statblocks": [], "readaloud": 0, "triggers": 0},
+"TSR 9486 Volo's Guid#312": {"locations": ["Tower of Wits and Work", "The Windlord's Rest", "Tilver's Palace", "Dundar's Fine Blades", "Grimwald's Revenge", "Whispering Witch", "The Flagon Held High", "Jonstyl's Banner", "Street of the Sorceress", "Tanalar's Fine Mounts", "Undreir Facilitations", "Cormyr Gate"], "actors": ["Filani the Sage"], "items": [], "statblocks": [], "readaloud": 0, "triggers": 0}
+}

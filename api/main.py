@@ -409,7 +409,7 @@ def process_job(job: dict, store: jobs.JobStore) -> None:
     doc_type = job["document_type"]
     if doc_type == "auto":
         doc_type = job.get("detected_type") or doctypes.detect(
-            job["path"], " ".join(doc[i].get_text() for i in range(min(3, len(doc)))))
+            job["path"], " ".join(chunker.page_text(doc[i]) for i in range(min(3, len(doc)))))
         store.update(job["id"], detected_type=doc_type)
     hints = json.loads(job["hints"] or "{}")
     current_location, current_scene = hints.get("location"), hints.get("scene")
@@ -423,6 +423,9 @@ def process_job(job: dict, store: jobs.JobStore) -> None:
     errors = job["chunk_errors"]
     chunks = list(chunker.chunk_document(doc))
     store.update(job["id"], chunks_total=len(chunks))
+    if not chunks:
+        raise RuntimeError(
+            f"No text extracted from {len(doc)}-page PDF (scanned/image-only? needs OCR) - nothing ingested")
 
     for i, chunk in enumerate(chunks):
         if i < skip:

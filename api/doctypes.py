@@ -25,7 +25,7 @@ KEYWORDS = [
                "gamemaster's guide", "game master's guide", "rules", "handbook", "quickstart rules"]),
     ("accessory", ["screen", "accessory", "deck", "tarot", "map pack", "character sheet", "cheat sheet",
                    "cards", "tokens", "supplement", "toolkit"]),
-    ("setting", ["setting", "gazetteer", "atlas", "world guide", "sourcebook", "almanac", "lands of"]),
+    ("setting", ["setting", "gazetteer", "atlas", "world guide", "sourcebook", "almanac", "lands of", "city of", "cities", "neighborhoods", "campaign setting"]),
     ("campaign", ["campaign", "adventure path", "saga", "chronicle", "season"]),
     ("session_transcript", ["transcript", "session recap", "session log", "session notes"]),
     ("module", ["module", "adventure", "scenario", "dungeon", "one-shot", "oneshot", "level "]),
@@ -35,7 +35,7 @@ KEYWORDS = [
 def detect(path: str, first_pages_text: str) -> str:
     name = path.lower()
     text = first_pages_text.lower()
-    best, best_score = "module", 0
+    best, best_score = "module", 1  # a single weak text hit isn't enough to beat the default
     for doc_type, words in KEYWORDS:
         score = sum(3 for w in words if re.search(rf"\b{re.escape(w)}", name))
         score += sum(1 for w in words if re.search(rf"\b{re.escape(w)}", text))

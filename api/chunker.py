@@ -20,6 +20,40 @@ the split.
 """
 import re
 
+OCR_DPI = 300
+OCR_LANG = "eng"
+OCR_MIN_CHARS = 20   # a page with fewer extractable characters than this is treated as a scan
+
+# page-dict cache so OCR runs once per page even though the document is walked several times
+_page_cache = {}
+
+
+def _page_dict(page):
+    """page.get_text("dict"), falling back to Tesseract OCR for image-only pages."""
+    key = (id(page.parent), page.number)
+    if key in _page_cache:
+        return _page_cache[key]
+    data = page.get_text("dict")
+    if page.get_images() and sum(
+            len(sp["text"]) for b in data.get("blocks", []) if b.get("type") == 0
+            for ln in b.get("lines", []) for sp in ln.get("spans", [])) < OCR_MIN_CHARS:
+        try:
+            tp = page.get_textpage_ocr(language=OCR_LANG, dpi=OCR_DPI, full=True)
+            data = page.get_text("dict", textpage=tp)
+        except Exception:   # tesseract missing/failing: keep the (empty) native text
+            pass
+    _page_cache[key] = data
+    return data
+
+
+def page_text(page) -> str:
+    """Plain text of a page (OCR'd if it is a scan)."""
+    return "\n".join(
+        "".join(sp["text"] for sp in ln.get("spans", []))
+        for b in _page_dict(page).get("blocks", []) if b.get("type") == 0
+        for ln in b.get("lines", []))
+
+
 ITALIC_FLAG = 2
 BOLD_FLAG = 16
 MIN_CHUNK_WORDS = 150
@@ -59,7 +93,7 @@ def _rect_contains(rect, bbox) -> bool:
 
 def _paragraphs_with_spans(page):
     """Yield (text, spans) per paragraph block from the page's structured text."""
-    data = page.get_text("dict")
+    data = _page_dict(page)
     for block in data.get("blocks", []):
         if block.get("type") != 0:
             continue
@@ -100,7 +134,7 @@ def _body_font_size(doc) -> float:
     """Most common font size by character count - the body text size."""
     counts = {}
     for page in doc:
-        for block in page.get_text("dict").get("blocks", []):
+        for block in _page_dict(page).get("blocks", []):
             for line in block.get("lines", []) if block.get("type") == 0 else []:
                 for span in line.get("spans", []):
                     key = round(span["size"], 1)
@@ -142,6 +176,7 @@ def _running_headers(doc) -> set:
 def chunk_document(doc):
     """Yield {"text", "structural_hints", "section", "page"} chunks across the
     whole document, with 2-3 sentences of overlap from the previous chunk."""
+    _page_cache.clear()
     body_size = _body_font_size(doc)
     noise = _running_headers(doc)
     heading_sizes = []   # distinct heading sizes seen, largest first -> levels
@@ -210,3 +245,4 @@ def chunk_document(doc):
             chunk = {**chunk, "text": f"{previous_tail}\n\n{raw}"}
         previous_tail = _sentence_tail(raw, OVERLAP_SENTENCES)
         yield chunk
+    _page_cache.clear()

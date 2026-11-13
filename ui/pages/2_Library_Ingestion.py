@@ -124,13 +124,25 @@ with right:
         data = api("GET", "/jobs", params={"limit": 50})
         if not data:
             return
-        rows = data["jobs"]
+        # /jobs lists newest first, so a running job can fall outside the first page; ask for it directly
+        running = (api("GET", "/jobs", params={"status": "running"}) or {}).get("jobs", [])
+        running_ids = {r["id"] for r in running}
+        rows = running + [r for r in data["jobs"] if r["id"] not in running_ids]
         active = [r for r in rows if r["status"] in ("queued", "running")]
         st.subheader(f"Jobs ({len(active)} active)")
         if window:
             st.caption(window_banner(window))
         if active and st.button("Cancel all"):
             api("POST", "/jobs/cancel_all")
+        if running:
+            for r in running:
+                total = r["chunks_total"] or 0
+                kind = r["document_type"] if r["document_type"] != "auto" else f"auto→{r.get('detected_type') or '?'}"
+                st.markdown(f"**⚙️ Now running:** {r['path']} [{kind}]")
+                st.progress((r["chunks_done"] / total) if total else 0.0,
+                            text=f"{r['chunks_done']}/{total or '?'} chunks")
+        elif active:
+            st.caption("Nothing running right now" + (" (window closed)." if paused else " - the next job starts shortly."))
         for r in rows[:25]:
             total = r["chunks_total"] or 0
             frac = (r["chunks_done"] / total) if total else 0.0

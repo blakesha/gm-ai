@@ -97,7 +97,20 @@ def delete_session(session_id: str):
     if not p.exists():
         raise HTTPException(404, "session not found")
     p.unlink()
+    try:
+        import hooks
+        from kg import KnowledgeGraphManager
+        hooks.clear_session(KnowledgeGraphManager(), session_id)  # drop its hook resolutions
+    except Exception:
+        pass
     return {"deleted": session_id}
+
+
+def title_of(session_id: str) -> str:
+    try:
+        return _read(session_id).get("title") or ""
+    except Exception:
+        return ""
 
 
 def record_turn(session_id: Optional[str], user_text: str, result: dict) -> None:

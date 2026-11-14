@@ -172,6 +172,7 @@ def map_locations(locations: list, kg, triples: list) -> None:
                 continue
             target_uri = place_uri(kg, target, triples)
             triples.append(f"{location_uri} rpg:connectsTo {target_uri} .")
+            triples.append(f"{target_uri} rpg:connectsTo {location_uri} .")  # symmetric, asserted both ways
 
 
 def map_scenes(scenes: list, kg, triples: list) -> None:

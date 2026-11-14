@@ -24,6 +24,11 @@ def escape_literal(value) -> str:
 # "Old Skull" and "Old Skull Inn" really are different places.
 PLACE_TYPES = {"World", "Region", "Settlement", "Structure", "Landmark", "Location", "Room"}
 ACTOR_TYPES = {"Actor", "Organization", "Deity"}
+# Direct superclass per ontology.ttl, asserted at write time (no reasoner).
+SUPERTYPES = {t: "Location" for t in PLACE_TYPES - {"Location"}}
+SUPERTYPES.update({"Organization": "Actor", "Deity": "Actor", "HistoricalEvent": "Event",
+                   "SessionEvent": "Event", "Scene": "Event", "Adventure": "SourceDocument"})
+GENERIC_TYPES = set(SUPERTYPES.values())
 ARTICLES = {"the", "a", "an"}
 PLACE_DESCRIPTORS = {"village", "town", "city", "hamlet", "township", "kingdom", "realm", "region", "province"}
 ACTOR_TITLES = {"lord", "lady", "sir", "dame", "king", "queen", "prince", "princess", "duke", "duchess",
@@ -212,7 +217,10 @@ class KnowledgeGraphManager:
 
             if score <= 0.0:
                 continue
-            if uri not in best or score > best[uri][0]:
+            type_name = b["type"]["value"].split("#")[-1]
+            if uri in best and score == best[uri][0] and type_name in GENERIC_TYPES:
+                continue  # entities now carry their superclass too; report the specific type
+            if uri not in best or score >= best[uri][0]:
                 best[uri] = (score, b["type"]["value"], label)
 
         # On equal scores prefer real world entities over per-chunk bookkeeping
@@ -336,5 +344,9 @@ class KnowledgeGraphManager:
         # they won't be treated as the *same* entity, not that their URIs differ.
         uri = f"rpg:{safe_type}_{self.sanitize_qname(name, 'e_')}"
         triples.append(f"{uri} a rpg:{safe_type} .")
+        # The store does no inference, so assert the superclass up front
+        # (a Room is also a Location) instead of making queries walk subClassOf.
+        if safe_type in SUPERTYPES:
+            triples.append(f"{uri} a rpg:{SUPERTYPES[safe_type]} .")
         triples.append(f'{uri} rpg:name "{escape_literal(name)}" .')
         return uri

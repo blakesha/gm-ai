@@ -5,7 +5,6 @@ import streamlit as st
 
 API_URL = os.environ.get("API_URL", "http://agent-api:8000")
 
-st.set_page_config(page_title="Adventure Writer", layout="wide")
 st.title("✍️ Adventure Writer")
 st.caption("A writing partner for your own adventure. It checks the setting's knowledge graph for canon, "
            "invents new material with you, and keeps a Markdown document you can edit, download, "

@@ -483,6 +483,19 @@ def browse_library(path: str = ""):
     return {"path": str(target.relative_to(LIBRARY_DIR.resolve())), "entries": entries}
 
 
+@app.get("/library/ingested")
+def ingested_sources():
+    """Books actually present in the graph: SourceDocuments that at least one
+    entity points at via rpg:foundIn (authored Adventures have none)."""
+    res = kg_manager.execute_sparql(f"""{PREFIX}
+        SELECT ?name (COUNT(?e) AS ?entities) WHERE {{
+            ?d a rpg:SourceDocument ; rpg:name ?name .
+            ?e rpg:foundIn ?d .
+        }} GROUP BY ?name ORDER BY LCASE(?name)""")
+    return {"sources": [{"title": b["name"]["value"], "entities": int(b["entities"]["value"])}
+                        for b in res["results"]["bindings"]]}
+
+
 @app.post("/library/upload")
 async def upload_to_library(file: UploadFile = File(...), directory: str = Form("")):
     target_dir = _resolve_library_path(directory)

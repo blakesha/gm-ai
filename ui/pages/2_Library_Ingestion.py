@@ -161,3 +161,18 @@ with right:
                 st.code(r["last_error"], language="text")
 
     jobs_panel()
+
+# -------------------------------------------------------------------- ingested
+st.divider()
+st.subheader("Ingested books")
+st.caption("Books present in the knowledge graph (read from the graph, not the job history).")
+books = (api("GET", "/library/ingested") or {}).get("sources", [])
+if not books:
+    st.caption("Nothing has been ingested yet.")
+else:
+    rows = [{"Book": b["title"], "Entities": b["entities"]} for b in books]
+    q = st.text_input("Filter", placeholder="Search by title")
+    if q:
+        rows = [r for r in rows if q.lower() in r["Book"].lower()]
+    st.caption(f"{len(rows)} book(s)")
+    st.dataframe(rows, use_container_width=True, hide_index=True)

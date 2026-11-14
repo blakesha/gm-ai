@@ -28,6 +28,7 @@ services:
     volumes:
       - oxigraph_data:/data
     command: ["serve", "--location", "/data", "--bind", "0.0.0.0:7878"]
+    restart: unless-stopped
 
   llm:
     image: docker.io/ollama/ollama:rocm
@@ -48,6 +49,7 @@ services:
     security_opt:
       - seccomp=unconfined
       - label=disable
+    restart: unless-stopped
 
   agent-api:
     build:
@@ -76,6 +78,7 @@ services:
       - ./api:/app:z
       - ${LIBRARY_HOST_PATH:-/mnt/storage/share/RPG}:/library:z
       - jobs_data:/data
+    restart: unless-stopped
 
   web-ui:
     build:
@@ -90,6 +93,7 @@ services:
       - agent-api
     volumes:
       - ./ui:/app:z
+    restart: unless-stopped
 
   postman-tester:
     build:
